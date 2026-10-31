@@ -197,8 +197,8 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    private fun stopApp(it: Item) {
-        Sh.run("am force-stop --user ${it.user} ${it.pkg}")
+    private fun disableApp(it: Item) {
+        Sh.run("am force-stop --user ${it.user} ${it.pkg}; pm disable-user --user ${it.user} ${it.pkg}")
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -292,7 +292,7 @@ class MainActivity : ComponentActivity() {
                             { i -> toggleWhite(i) })
                         AppList(right, white, rememberLazyListState(), Modifier.weight(1f).padding(start = 14.dp), 56.dp,
                             { i -> act(i) { launch(i) } },
-                            { i -> act(i) { stopApp(i); launched.remove(i.key) } })
+                            { i -> act(i) { disableApp(i); launched.remove(i.key) } })
                     }
                 }
                 Column(
@@ -313,17 +313,23 @@ class MainActivity : ComponentActivity() {
                     Modifier.align(Alignment.BottomEnd).fillMaxWidth(0.5f).height(56.dp)
                         .pointerInput(right, white) {
                             detectTapGestures(onTap = {
-                                act {
-                                    val targets = right.filter { it.key !in white }
-                                    val command = targets.joinToString("; ") { item ->
-                                        "am force-stop --user ${item.user} ${item.pkg} >/dev/null 2>&1"
+                                val targets = right.filter { it.key !in white }
+                                if (targets.isNotEmpty()) scope.launch(Dispatchers.IO) {
+                                    targets.forEach { disableApp(it) }
+                                    val states = targets.associate { it.key to isPackageDisabled(it) }
+                                    val currentRunning = runningKeys()
+                                    withContext(Dispatchers.Main) {
+                                        items = items.map { item ->
+                                            states[item.key]?.let { item.copy(disabled = it) } ?: item
+                                        }
+                                        targets.forEach { launched.remove(it.key) }
+                                        running = currentRunning
                                     }
-                                    if (command.isNotBlank()) Sh.run(command)
                                 }
                             })
                         },
                     contentAlignment = Alignment.Center,
-                 ) { T("停止", c = Color.White, s = 16) }
+                 ) { T("停用", c = Color.White, s = 16) }
             }
         }
     }
