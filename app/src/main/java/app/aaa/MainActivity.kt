@@ -174,13 +174,19 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun launch(it: Item) {
+        // Enable the package for the selected Android user before starting its launcher activity.
         if (it.disabled) {
             Sh.run("pm enable --user ${it.user} ${it.pkg}")
             Thread.sleep(350)
         }
-        // Resolve and launch inside the target Android user. Do not use this app process's
-        // PackageManager launch intent: it may resolve the owner profile, not the cloned profile.
-        Sh.run("monkey --user ${it.user} -p ${it.pkg} 1")
+        // "monkey --user" is not a supported Android Monkey option. Use ActivityManager's
+        // user-aware intent resolution so cloned/work-profile apps launch in their own user.
+        Sh.run(
+            "am start --user ${it.user} " +
+                "-a android.intent.action.MAIN " +
+                "-c android.intent.category.LAUNCHER " +
+                "-p ${it.pkg}"
+        )
     }
 
     private fun disableApp(it: Item) {
