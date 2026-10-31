@@ -101,9 +101,16 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun launch(it: Item) {
-        val comp = packageManager.getLaunchIntentForPackage(it.pkg)?.component?.flattenToShortString() ?: return
-        if (it.disabled) Sh.run("pm enable --user ${it.user} ${it.pkg}")
-        Sh.run("am start --user ${it.user} -n $comp")
+        if (it.disabled) {
+            Sh.run("pm enable --user ${it.user} ${it.pkg}")
+            Thread.sleep(350)
+        }
+        val comp = packageManager.getLaunchIntentForPackage(it.pkg)?.component?.flattenToShortString()
+        if (comp != null) {
+            Sh.run("am start --user ${it.user} -n $comp")
+        } else {
+            Sh.run("monkey --user ${it.user} -p ${it.pkg} 1")
+        }
     }
 
     private fun freeze(it: Item) {
