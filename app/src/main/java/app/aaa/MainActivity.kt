@@ -401,12 +401,14 @@ fun AppList(
         }
     }
     CompositionLocalProvider(LocalViewConfiguration provides quickLongPressConfiguration) {
-    LazyColumn(modifier, state, contentPadding = PaddingValues(bottom = bottomPad)) {
+    BoxWithConstraints(modifier) {
+    val itemHeight = ((maxHeight - bottomPad).coerceAtLeast(0.dp)) / 15
+    LazyColumn(Modifier.fillMaxSize(), state, contentPadding = PaddingValues(bottom = bottomPad)) {
         items(list, key = { it.key }) { it ->
             val cur by rememberUpdatedState(it)
             val disabledNow = it.disabled
             Row(
-                Modifier.fillMaxWidth().padding(vertical = 4.dp).alpha(if (disabledNow) 0.3f else 1f)
+                Modifier.fillMaxWidth().height(itemHeight).alpha(if (disabledNow) 0.3f else 1f)
                     .pointerInput(cur.key) {
                         detectTapGestures(
                             onTap = { onClick(cur) },
@@ -432,18 +434,19 @@ fun AppList(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.Center,
             ) {
-                T(if (it.key in white) "☆" else "", c = Color.White, s = 12, modifier = Modifier.width(14.dp))
+                T(if (it.key in white) "☆" else "", c = Color.White, s = 14, modifier = Modifier.width(16.dp))
                 Box {
-                    Image(it.icon, null, Modifier.size(36.dp))
+                    Image(it.icon, null, Modifier.size(42.dp))
                     if (it.user != 0) T(
                         it.user.toString(), c = Color.Black, s = 8,
                         modifier = Modifier.align(Alignment.BottomEnd).background(Color(0xFF00FF00)).padding(horizontal = 2.dp),
                     )
                 }
-                Spacer(Modifier.width(6.dp))
-                T(it.label, c = Color.White, s = 12, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Spacer(Modifier.width(8.dp))
+                T(it.label, c = Color.White, s = 14, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
         }
+    }
     }
     }
 }
