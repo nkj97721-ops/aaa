@@ -416,6 +416,7 @@ fun AppList(
                     .pointerInput(cur.key) {
                         var horizontalDistance = 0f
                         detectHorizontalDragGestures(
+                            onDragStart = { horizontalDistance = 0f },
                             onHorizontalDrag = { change, dragAmount ->
                                 horizontalDistance += dragAmount
                                 change.consume()
