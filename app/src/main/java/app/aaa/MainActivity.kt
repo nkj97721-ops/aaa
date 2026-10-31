@@ -273,6 +273,7 @@ class MainActivity : ComponentActivity() {
 
                     val fresh = withContext(Dispatchers.IO) { loadItems(cached) }
                     items = fresh
+                    leftState.scrollToItem(0)
                     withContext(Dispatchers.IO) { saveCachedItems(fresh) }
                 }
             }
