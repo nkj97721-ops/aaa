@@ -300,11 +300,8 @@ class MainActivity : ComponentActivity() {
                 ) {
                     ("ABCDEFGHIJKLMNOPQRSTUVWXYZ").forEach { c ->
                         Box(
-                            Modifier.weight(1f).fillMaxWidth().pointerInput(c) {
-                                detectTapGestures(
-                                    onTap = { filter = c },
-                                )
-                            },
+                            Modifier.weight(1f).fillMaxWidth()
+                                .clickable { filter = c },
                             contentAlignment = Alignment.Center,
                         ) {
                             T(c.toString(), c = if (filter == c) Color.White else Color(0xFF888888), s = 11)
