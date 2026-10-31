@@ -56,7 +56,10 @@ class MainActivity : ComponentActivity() {
     private val prefs by lazy { getSharedPreferences("p", Context.MODE_PRIVATE) }
 
     private fun initialOf(s: String): Char {
-        val c = tr.transliterate(s.take(1)).firstOrNull()?.uppercaseChar() ?: '#'
+        val first = s.trim().firstOrNull() ?: return '#'
+        val digits = mapOf('0' to 'L', '1' to 'Y', '2' to 'E', '3' to 'S', '4' to 'S', '5' to 'W', '6' to 'L', '7' to 'Q', '8' to 'B', '9' to 'J')
+        if (first.isDigit()) return digits[first] ?: '#'
+        val c = tr.transliterate(first.toString()).firstOrNull()?.uppercaseChar() ?: '#'
         return if (c in 'A'..'Z') c else '#'
     }
 
@@ -68,7 +71,7 @@ class MainActivity : ComponentActivity() {
             .ifEmpty { listOf(0) }
         val usage = (getSystemService(Context.USAGE_STATS_SERVICE) as UsageStatsManager)
             .queryUsageStats(UsageStatsManager.INTERVAL_BEST, System.currentTimeMillis() - 30L * 86400000, System.currentTimeMillis())
-            .groupBy { it.packageName }.mapValues { e -> e.value.maxOf { it.lastTimeUsed } }
+            .groupBy { it.packageName }.mapValues { e -> e.value.sumOf { it.totalTimeInForeground } }
         val out = ArrayList<Item>()
         for (u in users) {
             val all = Sh.run("pm list packages -3 --user $u").lines().mapNotNull { it.removePrefix("package:").trim().ifEmpty { null } }
@@ -155,7 +158,7 @@ class MainActivity : ComponentActivity() {
                     Spacer(Modifier.height(48.dp))
                     Row(Modifier.weight(1f).fillMaxWidth()) {
                         AppList(left, white, leftState, Modifier.weight(1f).padding(end = 14.dp), 0.dp,
-                            { top = it?.let { i -> "${i.pkg}  u${i.user}" } },
+                            { top = it?.let { i -> "${i.pkg}" } },
                             { i -> act { launch(i); launched[i.key] = System.currentTimeMillis() } },
                             { i -> toggleWhite(i.pkg) })
                         AppList(right, white, rememberLazyListState(), Modifier.weight(1f).padding(start = 14.dp), 56.dp,
@@ -168,7 +171,7 @@ class MainActivity : ComponentActivity() {
                     Modifier.align(Alignment.Center).fillMaxHeight().width(28.dp).padding(top = 48.dp, bottom = 8.dp),
                     verticalArrangement = Arrangement.SpaceEvenly,
                 ) {
-                    ("ABCDEFGHIJKLMNOPQRSTUVWXYZ#").forEach { c ->
+                    ("ABCDEFGHIJKLMNOPQRSTUVWXYZ").forEach { c ->
                         Box(
                             Modifier.weight(1f).fillMaxWidth().pointerInput(c) {
                                 detectTapGestures(
@@ -224,7 +227,7 @@ fun AppList(
                     Image(it.icon, null, Modifier.size(36.dp))
                     if (it.user != 0) T(
                         it.user.toString(), c = Color.Black, s = 8,
-                        modifier = Modifier.align(Alignment.BottomEnd).background(Color(0xFFFFC107)).padding(horizontal = 2.dp),
+                        modifier = Modifier.align(Alignment.BottomEnd).background(Color(0xFF39D353)).padding(horizontal = 2.dp),
                     )
                 }
                 Spacer(Modifier.width(6.dp))
