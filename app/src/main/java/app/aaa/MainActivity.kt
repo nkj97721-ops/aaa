@@ -249,7 +249,7 @@ class MainActivity : ComponentActivity() {
                 prefs.edit().putStringSet("white", white).apply()
             }
             var filter by remember { mutableStateOf<Char?>(null) }
-            val leftState = rememberLazyListState()
+            var leftListGeneration by remember { mutableIntStateOf(0) }
             val refreshMutex = remember { kotlinx.coroutines.sync.Mutex() }
 
             suspend fun refreshAll() {
@@ -279,7 +279,7 @@ class MainActivity : ComponentActivity() {
 
                     val fresh = withContext(Dispatchers.IO) { loadItems(cached) }
                     items = fresh
-                    leftState.requestScrollToItem(0)
+                    leftListGeneration++
                     withContext(Dispatchers.IO) { saveCachedItems(fresh) }
                 }
             }
@@ -314,21 +314,23 @@ class MainActivity : ComponentActivity() {
                 Column(Modifier.fillMaxSize()) {
                     Spacer(Modifier.height(48.dp))
                     Row(Modifier.weight(1f).fillMaxWidth()) {
-                        AppList(left, white, leftState, Modifier.weight(1f).padding(end = 20.dp), 0.dp,
-                            { i -> act(i) {
-                                if (launch(i)) {
-                                    launched[i.key] = System.currentTimeMillis()
-                                } else {
-                                    runOnUiThread {
-                                        android.widget.Toast.makeText(
-                                            this@MainActivity, "启动失败：${i.label}",
-                                            android.widget.Toast.LENGTH_SHORT
-                                        ).show()
+                        key(leftListGeneration) {
+                            AppList(left, white, rememberLazyListState(), Modifier.weight(1f).padding(end = 20.dp), 0.dp,
+                                { i -> act(i) {
+                                    if (launch(i)) {
+                                        launched[i.key] = System.currentTimeMillis()
+                                    } else {
+                                        runOnUiThread {
+                                            android.widget.Toast.makeText(
+                                                this@MainActivity, "启动失败：${i.label}",
+                                                android.widget.Toast.LENGTH_SHORT
+                                            ).show()
+                                        }
                                     }
-                                }
-                            } },
-                            { i -> act(i) { disableApp(i); launched.remove(i.key) } },
-                            { i -> toggleWhite(i) })
+                                } },
+                                { i -> act(i) { disableApp(i); launched.remove(i.key) } },
+                                { i -> toggleWhite(i) })
+                        }
                         AppList(right, white, rememberLazyListState(), Modifier.weight(1f).padding(start = 20.dp), 56.dp,
                             { i -> act(i) {
                                 if (!launch(i)) runOnUiThread {
