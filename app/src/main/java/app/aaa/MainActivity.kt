@@ -302,7 +302,7 @@ class MainActivity : ComponentActivity() {
             }
 
             val left = items.filter { filter == null || it.initial == filter }
-                .let { if (filter == null) it.take(15) else it.take(30) }
+                .let { if (filter == null) it.take(15) else it }
             val right = items.filter { it.key in launched && !it.disabled }
 
             Box(Modifier.fillMaxSize().background(Color.Black)) {
