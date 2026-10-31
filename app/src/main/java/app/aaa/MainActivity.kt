@@ -331,6 +331,8 @@ class MainActivity : ComponentActivity() {
                                 } },
                                 { i -> act(i) { disableApp(i); launched.remove(i.key) } },
                                 { i -> toggleWhite(i) })
+                        } else {
+                            Spacer(Modifier.weight(1f).fillMaxHeight().padding(end = 20.dp))
                         }
                         AppList(right, white, rememberLazyListState(), Modifier.weight(1f).padding(start = 20.dp), 56.dp,
                             { i -> act(i) {
