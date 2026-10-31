@@ -173,17 +173,6 @@ class MainActivity : ComponentActivity() {
         return out.sortedByDescending { it.used }
     }
 
-    private fun runningKeys(): Set<String> {
-        val s = HashSet<String>()
-        Sh.run("ps -A -o USER,NAME").lineSequence().drop(1).forEach { l ->
-            val t = l.trim().split(Regex("\\s+"))
-            if (t.size < 2) return@forEach
-            val m = Regex("^u(\\d+)_").find(t[0]) ?: return@forEach
-            s += "${t[1].substringBefore(':')}:${m.groupValues[1]}"
-        }
-        return s
-    }
-
     private fun launch(it: Item) {
         if (it.disabled) {
             Sh.run("pm enable --user ${it.user} ${it.pkg}")
@@ -210,7 +199,6 @@ class MainActivity : ComponentActivity() {
         setContent {
             val scope = rememberCoroutineScope()
             var items by remember { mutableStateOf<List<Item>>(emptyList()) }
-            var running by remember { mutableStateOf<Set<String>>(emptySet()) }
             val launched = remember { mutableStateMapOf<String, Long>() }
             var white by remember {
                 mutableStateOf(
@@ -239,7 +227,6 @@ class MainActivity : ComponentActivity() {
                          withContext(Dispatchers.IO) { saveCachedItems(fresh) }
                         needReload = false
                     }
-                    running = withContext(Dispatchers.IO) { runningKeys() }
                 }
             }
 
@@ -256,10 +243,7 @@ class MainActivity : ComponentActivity() {
                         if (usageAccess && !previousUsageAccess) needReload = true
                         previousUsageAccess = usageAccess
                         if (needReload) refreshAll()
-                        running = withContext(Dispatchers.IO) { runningKeys() }
                     } else if (Shizuku.pingBinder()) Shizuku.requestPermission(0)
-                    val now = System.currentTimeMillis()
-                    launched.entries.removeAll { it.key !in running && now - it.value > 6000 }
                     delay(2000)
                 }
             }
@@ -273,15 +257,13 @@ class MainActivity : ComponentActivity() {
             fun act(item: Item, block: () -> Unit) = scope.launch(Dispatchers.IO) {
                 block()
                 val disabled = isPackageDisabled(item)
-                val currentRunning = withContext(Dispatchers.IO) { runningKeys() }
                 withContext(Dispatchers.Main) {
                     items = items.map { if (it.key == item.key) it.copy(disabled = disabled) else it }
-                    running = currentRunning
                 }
             }
 
             val left = items.filter { filter == null || it.initial == filter }
-            val right = items.filter { it.key in launched && it.key in running }
+            val right = items.filter { it.key in launched && !it.disabled }
 
             Box(Modifier.fillMaxSize().background(Color.Black)) {
                 Column(Modifier.fillMaxSize()) {
@@ -317,13 +299,11 @@ class MainActivity : ComponentActivity() {
                                 if (targets.isNotEmpty()) scope.launch(Dispatchers.IO) {
                                     targets.forEach { disableApp(it) }
                                     val states = targets.associate { it.key to isPackageDisabled(it) }
-                                    val currentRunning = runningKeys()
                                     withContext(Dispatchers.Main) {
                                         items = items.map { item ->
                                             states[item.key]?.let { item.copy(disabled = it) } ?: item
                                         }
                                         targets.forEach { launched.remove(it.key) }
-                                        running = currentRunning
                                     }
                                 }
                             })
