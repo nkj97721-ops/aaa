@@ -39,7 +39,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.graphics.drawable.toBitmap
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
@@ -252,7 +251,6 @@ class MainActivity : ComponentActivity() {
             }
             var filter by remember { mutableStateOf<Char?>(null) }
             val leftState = rememberLazyListState()
-            var needReload by remember { mutableStateOf(true) }
             val refreshMutex = remember { kotlinx.coroutines.sync.Mutex() }
 
             suspend fun refreshAll() {
@@ -265,7 +263,6 @@ class MainActivity : ComponentActivity() {
                         val fresh = withContext(Dispatchers.IO) { loadItems(cached) }
                         items = fresh
                          withContext(Dispatchers.IO) { saveCachedItems(fresh) }
-                        needReload = false
                     }
                 }
             }
@@ -275,19 +272,9 @@ class MainActivity : ComponentActivity() {
             }
 
             LaunchedEffect(Unit) {
+                // Query once when the app starts. Further queries are user-triggered
+                // through the Refresh control; do not poll permissions in the background.
                 refreshAll()
-                var previousUsageAccess = hasUsageAccess()
-                while (true) {
-                    if (granted()) {
-                        val usageAccess = hasUsageAccess()
-                        if (usageAccess && !previousUsageAccess) needReload = true
-                        previousUsageAccess = usageAccess
-                        if (needReload) refreshAll()
-                    } else if (Shizuku.pingBinder()) {
-                        Shizuku.requestPermission(0)
-                    }
-                    delay(2000)
-                }
             }
 
             fun toggleWhite(item: Item) {
@@ -303,7 +290,8 @@ class MainActivity : ComponentActivity() {
                 }
             }
 
-            val left = items.filter { filter == null || it.initial == filter }.take(30)
+            val left = items.filter { filter == null || it.initial == filter }
+                .let { if (filter == null) it.take(15) else it.take(30) }
             val right = items.filter { it.key in launched && !it.disabled }
 
             Box(Modifier.fillMaxSize().background(Color.Black)) {
