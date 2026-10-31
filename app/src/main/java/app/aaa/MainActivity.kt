@@ -277,10 +277,6 @@ class MainActivity : ComponentActivity() {
                 }
             }
 
-            LaunchedEffect(filter) {
-                if (filter == null) leftState.scrollToItem(0)
-            }
-
             LaunchedEffect(Unit) {
                 // Startup is cache-only. Permission checks and fresh queries are
                 // performed exclusively by the Refresh control.
@@ -358,7 +354,6 @@ class MainActivity : ComponentActivity() {
                         .clickable {
                             scope.launch {
                                 filter = null
-                                leftState.scrollToItem(0)
                                 refreshAll()
                             }
                         },
