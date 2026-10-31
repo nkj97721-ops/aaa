@@ -178,12 +178,9 @@ class MainActivity : ComponentActivity() {
             Sh.run("pm enable --user ${it.user} ${it.pkg}")
             Thread.sleep(350)
         }
-        val comp = packageManager.getLaunchIntentForPackage(it.pkg)?.component?.flattenToShortString()
-        if (comp != null) {
-            Sh.run("am start --user ${it.user} -n $comp")
-        } else {
-            Sh.run("monkey --user ${it.user} -p ${it.pkg} 1")
-        }
+        // Resolve and launch inside the target Android user. Do not use this app process's
+        // PackageManager launch intent: it may resolve the owner profile, not the cloned profile.
+        Sh.run("monkey --user ${it.user} -p ${it.pkg} 1")
     }
 
     private fun disableApp(it: Item) {
