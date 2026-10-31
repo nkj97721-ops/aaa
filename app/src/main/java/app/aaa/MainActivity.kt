@@ -65,8 +65,6 @@ object Sh {
 class MainActivity : ComponentActivity() {
     private val tr by lazy { android.icu.text.Transliterator.getInstance("Han-Latin; Latin-ASCII") }
     private val prefs by lazy { getSharedPreferences("p", Context.MODE_PRIVATE) }
-    private var usageSettingsOpened = false
-
     private fun hasUsageAccess(): Boolean {
         val appOps = getSystemService(Context.APP_OPS_SERVICE) as AppOpsManager
         return appOps.checkOpNoThrow(
@@ -76,15 +74,6 @@ class MainActivity : ComponentActivity() {
         ) == AppOpsManager.MODE_ALLOWED
     }
 
-    override fun onResume() {
-        super.onResume()
-        if (hasUsageAccess()) {
-            usageSettingsOpened = false
-        } else if (!usageSettingsOpened) {
-            usageSettingsOpened = true
-            startActivity(Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS))
-        }
-    }
 
     private fun initialOf(s: String): Char {
         val first = s.trim().firstOrNull() ?: return '#'
@@ -232,8 +221,6 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
-        Shizuku.addRequestPermissionResultListener { _, _ -> }
-        if (Shizuku.pingBinder() && !granted()) Shizuku.requestPermission(0)
 
         setContent {
             val scope = rememberCoroutineScope()
@@ -256,14 +243,30 @@ class MainActivity : ComponentActivity() {
             suspend fun refreshAll() {
                 refreshMutex.withLock {
                     val cached = withContext(Dispatchers.IO) { loadCachedItems() }
-                    if (cached.isNotEmpty()) {
-                        items = cached
-                     }
-                    if (granted()) {
-                        val fresh = withContext(Dispatchers.IO) { loadItems(cached) }
-                        items = fresh
-                         withContext(Dispatchers.IO) { saveCachedItems(fresh) }
+                    if (cached.isNotEmpty()) items = cached
+
+                    // Permission checks and permission prompts happen only after
+                    // the user presses Refresh, never during startup or onResume.
+                    if (!Shizuku.pingBinder()) {
+                        runOnUiThread {
+                            android.widget.Toast.makeText(
+                                this@MainActivity, "Shizuku 未运行，请先启动 Shizuku 后再刷新",
+                                android.widget.Toast.LENGTH_SHORT
+                            ).show()
+                        }
+                        return@withLock
                     }
+                    if (!granted()) {
+                        Shizuku.requestPermission(0)
+                        return@withLock
+                    }
+                    if (!hasUsageAccess()) {
+                        startActivity(Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS))
+                    }
+
+                    val fresh = withContext(Dispatchers.IO) { loadItems(cached) }
+                    items = fresh
+                    withContext(Dispatchers.IO) { saveCachedItems(fresh) }
                 }
             }
 
@@ -272,9 +275,10 @@ class MainActivity : ComponentActivity() {
             }
 
             LaunchedEffect(Unit) {
-                // Query once when the app starts. Further queries are user-triggered
-                // through the Refresh control; do not poll permissions in the background.
-                refreshAll()
+                // Startup is cache-only. Permission checks and fresh queries are
+                // performed exclusively by the Refresh control.
+                val cached = withContext(Dispatchers.IO) { loadCachedItems() }
+                if (cached.isNotEmpty()) items = cached
             }
 
             fun toggleWhite(item: Item) {
