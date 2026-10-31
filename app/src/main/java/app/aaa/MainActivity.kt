@@ -74,6 +74,13 @@ class MainActivity : ComponentActivity() {
         ) == AppOpsManager.MODE_ALLOWED
     }
 
+    private fun tryGrantUsageAccess(): Boolean {
+        if (hasUsageAccess()) return true
+        val userId = android.os.Process.myUserHandle().identifier
+        Sh.run("cmd appops set --user $userId $packageName GET_USAGE_STATS allow")
+        return hasUsageAccess()
+    }
+
 
     private fun initialOf(s: String): Char {
         val first = s.trim().firstOrNull() ?: return '#'
@@ -260,8 +267,9 @@ class MainActivity : ComponentActivity() {
                         Shizuku.requestPermission(0)
                         return@withLock
                     }
-                    if (!hasUsageAccess()) {
+                    if (!tryGrantUsageAccess()) {
                         startActivity(Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS))
+                        return@withLock
                     }
 
                     val fresh = withContext(Dispatchers.IO) { loadItems(cached) }
