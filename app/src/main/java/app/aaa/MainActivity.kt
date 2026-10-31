@@ -18,6 +18,7 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -322,6 +323,7 @@ class MainActivity : ComponentActivity() {
                                     }
                                 }
                             } },
+                            { i -> act(i) { disableApp(i); launched.remove(i.key) } },
                             { i -> toggleWhite(i) })
                         AppList(right, white, rememberLazyListState(), Modifier.weight(1f).padding(start = 20.dp), 56.dp,
                             { i -> act(i) {
@@ -332,7 +334,8 @@ class MainActivity : ComponentActivity() {
                                     ).show()
                                 }
                             } },
-                            { i -> act(i) { disableApp(i); launched.remove(i.key) } })
+                            { i -> act(i) { disableApp(i); launched.remove(i.key) } },
+                            { i -> toggleWhite(i) })
                     }
                 }
                 Column(
@@ -389,7 +392,7 @@ fun AppList(
     list: List<Item>, white: Set<String>,
     state: androidx.compose.foundation.lazy.LazyListState,
     modifier: Modifier, bottomPad: androidx.compose.ui.unit.Dp,
-    onClick: (Item) -> Unit, onLong: (Item) -> Unit,
+    onClick: (Item) -> Unit, onLong: (Item) -> Unit, onSwipe: (Item) -> Unit,
 ) {
     val baseViewConfiguration = LocalViewConfiguration.current
     val quickLongPressConfiguration = remember(baseViewConfiguration) {
@@ -404,10 +407,25 @@ fun AppList(
             val disabledNow = it.disabled
             Row(
                 Modifier.fillMaxWidth().padding(vertical = 4.dp).alpha(if (disabledNow) 0.3f else 1f)
-                    .pointerInput(Unit) {
+                    .pointerInput(cur.key) {
                         detectTapGestures(
                             onTap = { onClick(cur) },
                             onLongPress = { onLong(cur) },
+                        )
+                    }
+                    .pointerInput(cur.key) {
+                        var horizontalDistance = 0f
+                        detectHorizontalDragGestures(
+                            onHorizontalDrag = { change, dragAmount ->
+                                horizontalDistance += dragAmount
+                                change.consume()
+                            },
+                            onDragEnd = {
+                                if (kotlin.math.abs(horizontalDistance) >= viewConfiguration.touchSlop) {
+                                    onSwipe(cur)
+                                }
+                            },
+                            onDragCancel = { horizontalDistance = 0f },
                         )
                     },
                 verticalAlignment = Alignment.CenterVertically,
