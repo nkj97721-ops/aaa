@@ -1,6 +1,7 @@
-# Manual rebuild trigger: 2026-11-01 00:00
 name: build
 on: [push, workflow_dispatch]
+permissions:
+  contents: write
 jobs:
   apk:
     runs-on: ubuntu-latest
@@ -10,8 +11,15 @@ jobs:
         with: { distribution: temurin, java-version: 17 }
       - uses: gradle/actions/setup-gradle@v4
         with: { gradle-version: "8.9" }
-      - run: gradle assembleDebug --no-daemon
+      - run: gradle assembleRelease --no-daemon
+      - name: Verify release APK
+        run: test -s app/build/outputs/apk/release/app-release.apk
       - uses: actions/upload-artifact@v4
         with:
-          name: aaa-debug
-          path: app/build/outputs/apk/debug/*.apk
+          name: abb-release
+          path: app/build/outputs/apk/release/app-release.apk
+      - name: Upload APK to GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v1.0.0
+          files: app/build/outputs/apk/release/app-release.apk
