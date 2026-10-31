@@ -202,7 +202,14 @@ class MainActivity : ComponentActivity() {
                     Modifier.align(Alignment.BottomEnd).fillMaxWidth(0.5f).height(56.dp)
                         .pointerInput(right, white) {
                             detectTapGestures(onTap = {
-                                act { right.filter { it.pkg !in white }.forEach { freeze(it) } }
+                                act {
+                                    val targets = right.filter { it.pkg !in white }
+                                    val command = targets.joinToString("; ") { item ->
+                                        "am force-stop --user ${item.user} ${item.pkg} >/dev/null 2>&1; " +
+                                            "pm disable-user --user ${item.user} ${item.pkg} >/dev/null 2>&1"
+                                    }
+                                    if (command.isNotBlank()) Sh.run(command)
+                                }
                             })
                         },
                     contentAlignment = Alignment.Center,
