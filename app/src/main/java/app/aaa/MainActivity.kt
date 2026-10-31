@@ -164,7 +164,13 @@ class MainActivity : ComponentActivity() {
                 } catch (_: Throwable) {}
             }
         }
-        return out.sortedByDescending { it.used }
+        // Keep the saved default sequence from cache. Fresh package enumeration
+        // may return a different order, so cached entries retain their positions.
+        val cachedOrder = cachedItems.mapIndexed { index, item -> item.key to index }.toMap()
+        return out.sortedWith(
+            compareBy<Item> { cachedOrder[it.key] ?: Int.MAX_VALUE }
+                .thenByDescending { it.used }
+        )
     }
 
     private fun launch(it: Item): Boolean {
