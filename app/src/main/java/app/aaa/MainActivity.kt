@@ -173,20 +173,57 @@ class MainActivity : ComponentActivity() {
         return out.sortedByDescending { it.used }
     }
 
-    private fun launch(it: Item) {
-        // Enable the package for the selected Android user before starting its launcher activity.
+    private fun launch(it: Item): Boolean {
+        // Re-enable only for the selected Android user.
         if (it.disabled) {
             Sh.run("pm enable --user ${it.user} ${it.pkg}")
             Thread.sleep(350)
+            if (isPackageDisabled(it)) return false
         }
-        // "monkey --user" is not a supported Android Monkey option. Use ActivityManager's
-        // user-aware intent resolution so cloned/work-profile apps launch in their own user.
-        Sh.run(
-            "am start --user ${it.user} " +
+
+        val user = it.user
+        val pkg = it.pkg
+
+        // Resolve the real launcher component first. This handles apps whose launch
+        // activity is an alias or cannot be resolved by a package-only MAIN intent.
+        val resolved = Sh.run(
+            "cmd package resolve-activity --brief --user $user " +
                 "-a android.intent.action.MAIN " +
                 "-c android.intent.category.LAUNCHER " +
-                "-p ${it.pkg}"
+                "-p $pkg"
         )
+        val component = resolved.lineSequence()
+            .map { line -> line.trim() }
+            .firstOrNull { line -> line.startsWith("$pkg/") && !line.contains(" ") }
+
+        if (component != null) {
+            val result = Sh.run("am start --user $user -n $component")
+            if (!result.contains("Error:", ignoreCase = true) &&
+                !result.contains("Exception", ignoreCase = true)) return true
+        }
+
+        // Some apps expose CATEGORY_MONKEY rather than a normal launcher entry.
+        // ActivityManager supports --user; the Monkey executable itself does not.
+        val monkeyCategory = Sh.run(
+            "am start --user $user " +
+                "-a android.intent.action.MAIN " +
+                "-c android.intent.category.MONKEY " +
+                "-p $pkg"
+        )
+        if (!monkeyCategory.contains("Error:", ignoreCase = true) &&
+            !monkeyCategory.contains("No activity found", ignoreCase = true) &&
+            !monkeyCategory.contains("Exception", ignoreCase = true)) return true
+
+        // Last fallback: retry standard launcher intent through ActivityManager.
+        val launcher = Sh.run(
+            "am start --user $user " +
+                "-a android.intent.action.MAIN " +
+                "-c android.intent.category.LAUNCHER " +
+                "-p $pkg"
+        )
+        return !launcher.contains("Error:", ignoreCase = true) &&
+            !launcher.contains("No activity found", ignoreCase = true) &&
+            !launcher.contains("Exception", ignoreCase = true)
     }
 
     private fun disableApp(it: Item) {
@@ -273,10 +310,28 @@ class MainActivity : ComponentActivity() {
                     Spacer(Modifier.height(48.dp))
                     Row(Modifier.weight(1f).fillMaxWidth()) {
                         AppList(left, white, leftState, Modifier.weight(1f).padding(end = 14.dp), 0.dp,
-                            { i -> act(i) { launch(i); launched[i.key] = System.currentTimeMillis() } },
+                            { i -> act(i) {
+                                if (launch(i)) {
+                                    launched[i.key] = System.currentTimeMillis()
+                                } else {
+                                    runOnUiThread {
+                                        android.widget.Toast.makeText(
+                                            this@MainActivity, "启动失败：${i.label}",
+                                            android.widget.Toast.LENGTH_SHORT
+                                        ).show()
+                                    }
+                                }
+                            } },
                             { i -> toggleWhite(i) })
                         AppList(right, white, rememberLazyListState(), Modifier.weight(1f).padding(start = 14.dp), 56.dp,
-                            { i -> act(i) { launch(i) } },
+                            { i -> act(i) {
+                                if (!launch(i)) runOnUiThread {
+                                    android.widget.Toast.makeText(
+                                        this@MainActivity, "启动失败：${i.label}",
+                                        android.widget.Toast.LENGTH_SHORT
+                                    ).show()
+                                }
+                            } },
                             { i -> act(i) { disableApp(i); launched.remove(i.key) } })
                     }
                 }
