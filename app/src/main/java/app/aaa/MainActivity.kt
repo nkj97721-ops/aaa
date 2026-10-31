@@ -165,11 +165,11 @@ class MainActivity : ComponentActivity() {
                     Spacer(Modifier.height(48.dp))
                     Row(Modifier.weight(1f).fillMaxWidth()) {
                         AppList(left, white, leftState, Modifier.weight(1f).padding(end = 14.dp), 0.dp,
-                            { top = it?.let { i -> "${i.pkg}" } },
+                            { top = it?.pkg },
                             { i -> act { launch(i); launched[i.key] = System.currentTimeMillis() } },
                             { i -> toggleWhite(i.pkg) })
                         AppList(right, white, rememberLazyListState(), Modifier.weight(1f).padding(start = 14.dp), 56.dp,
-                            { top = it?.let { i -> "${i.pkg}  u${i.user}" } },
+                            { top = it?.pkg },
                             { i -> act { launch(i) } },
                             { i -> act { freeze(i) } })
                     }
