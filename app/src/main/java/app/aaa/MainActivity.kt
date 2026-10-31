@@ -2,7 +2,10 @@ package app.aaa
 
 import android.app.usage.UsageStatsManager
 import android.content.Context
+import android.content.Intent
 import android.content.pm.PackageManager
+import android.app.AppOpsManager
+import android.provider.Settings
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -56,6 +59,26 @@ object Sh {
 class MainActivity : ComponentActivity() {
     private val tr by lazy { android.icu.text.Transliterator.getInstance("Han-Latin; Latin-ASCII") }
     private val prefs by lazy { getSharedPreferences("p", Context.MODE_PRIVATE) }
+    private var usageSettingsOpened = false
+
+    private fun hasUsageAccess(): Boolean {
+        val appOps = getSystemService(Context.APP_OPS_SERVICE) as AppOpsManager
+        return appOps.checkOpNoThrow(
+            AppOpsManager.OPSTR_GET_USAGE_STATS,
+            android.os.Process.myUid(),
+            packageName,
+        ) == AppOpsManager.MODE_ALLOWED
+    }
+
+    override fun onResume() {
+        super.onResume()
+        if (hasUsageAccess()) {
+            usageSettingsOpened = false
+        } else if (!usageSettingsOpened) {
+            usageSettingsOpened = true
+            startActivity(Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS))
+        }
+    }
 
     private fun initialOf(s: String): Char {
         val first = s.trim().firstOrNull() ?: return '#'
@@ -143,13 +166,12 @@ class MainActivity : ComponentActivity() {
             }
 
             LaunchedEffect(Unit) {
-                withContext(Dispatchers.IO) {
-                    if (granted()) Sh.run("appops set $packageName GET_USAGE_STATS allow")
-                }
                 while (true) {
                     withContext(Dispatchers.IO) {
                         if (granted()) {
-                            if (needReload) { items = loadItems(); needReload = false }
+                            if (hasUsageAccess()) {
+                                if (needReload) { items = loadItems(); needReload = false }
+                            }
                             running = runningKeys()
                         } else if (Shizuku.pingBinder()) Shizuku.requestPermission(0)
                     }
@@ -189,7 +211,11 @@ class MainActivity : ComponentActivity() {
                             Modifier.weight(1f).fillMaxWidth().pointerInput(c) {
                                 detectTapGestures(
                                     onTap = { filter = c },
-                                    onLongPress = { filter = null },
+                                    onLongPress = {
+                                        filter = null
+                                        needReload = true
+                                        scope.launch { leftState.scrollToItem(0) }
+                                    },
                                 )
                             },
                             contentAlignment = Alignment.Center,
