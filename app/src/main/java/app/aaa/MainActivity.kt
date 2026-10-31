@@ -38,6 +38,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.graphics.drawable.toBitmap
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
@@ -250,6 +251,7 @@ class MainActivity : ComponentActivity() {
             }
             var filter by remember { mutableStateOf<Char?>(null) }
             val leftState = rememberLazyListState()
+            var needReload by remember { mutableStateOf(true) }
             val refreshMutex = remember { kotlinx.coroutines.sync.Mutex() }
 
             suspend fun refreshAll() {
@@ -262,6 +264,7 @@ class MainActivity : ComponentActivity() {
                         val fresh = withContext(Dispatchers.IO) { loadItems(cached) }
                         items = fresh
                          withContext(Dispatchers.IO) { saveCachedItems(fresh) }
+                        needReload = false
                     }
                 }
             }
@@ -272,6 +275,18 @@ class MainActivity : ComponentActivity() {
 
             LaunchedEffect(Unit) {
                 refreshAll()
+                var previousUsageAccess = hasUsageAccess()
+                while (true) {
+                    if (granted()) {
+                        val usageAccess = hasUsageAccess()
+                        if (usageAccess && !previousUsageAccess) needReload = true
+                        previousUsageAccess = usageAccess
+                        if (needReload) refreshAll()
+                    } else if (Shizuku.pingBinder()) {
+                        Shizuku.requestPermission(0)
+                    }
+                    delay(2000)
+                }
             }
 
             fun toggleWhite(item: Item) {
@@ -338,9 +353,9 @@ class MainActivity : ComponentActivity() {
                     Modifier.align(Alignment.BottomStart).fillMaxWidth(0.5f).padding(end = 20.dp).height(56.dp)
                         .clickable {
                             scope.launch {
-                                refreshAll()
                                 filter = null
                                 leftState.scrollToItem(0)
+                                refreshAll()
                             }
                         },
                     contentAlignment = Alignment.Center,
