@@ -228,6 +228,7 @@ fun AppList(
                         )
                     },
                 verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.Center,
             ) {
                 T(if (it.pkg in white) "☆" else "", c = Color.White, s = 12, modifier = Modifier.width(14.dp))
                 Box {
