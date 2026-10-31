@@ -301,8 +301,10 @@ class MainActivity : ComponentActivity() {
                 }
             }
 
-            val left = items.filter { filter == null || it.initial == filter }
-                .let { if (filter == null) it.take(15) else it }
+            // Treat each installed app profile as a separate entry.
+            // Package name alone is not unique when the same app exists in multiple Android users.
+            val left = items.distinctBy { it.key }
+                .filter { filter == null || it.initial == filter }
             val right = items.filter { it.key in launched && !it.disabled }
 
             Box(Modifier.fillMaxSize().background(Color.Black)) {
