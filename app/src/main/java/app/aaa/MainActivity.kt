@@ -7,6 +7,10 @@ import android.content.pm.PackageManager
 import android.app.AppOpsManager
 import android.provider.Settings
 import android.os.Bundle
+import android.graphics.BitmapFactory
+import org.json.JSONArray
+import org.json.JSONObject
+import java.io.File
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -25,6 +29,7 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalViewConfiguration
 import androidx.compose.ui.platform.ViewConfiguration
@@ -91,15 +96,59 @@ class MainActivity : ComponentActivity() {
     private fun granted() = Shizuku.pingBinder() &&
         Shizuku.checkSelfPermission() == PackageManager.PERMISSION_GRANTED
 
-    private fun loadItems(): List<Item> {
+    private fun iconFile(pkg: String, user: Int) =
+        File(File(cacheDir, "app-icons").apply { mkdirs() }, "${user}-${pkg}.png")
+
+    private fun loadCachedItems(): List<Item> {
+        val raw = prefs.getString("items_cache", null) ?: return emptyList()
+        return try {
+            val array = JSONArray(raw)
+            buildList {
+                for (i in 0 until array.length()) {
+                    val o = array.getJSONObject(i)
+                    val pkg = o.getString("pkg")
+                    val user = o.getInt("user")
+                    val bitmap = BitmapFactory.decodeFile(iconFile(pkg, user).absolutePath) ?: continue
+                    add(Item(pkg, user, o.getString("label"), bitmap.asImageBitmap(),
+                        o.getString("initial").firstOrNull() ?: '#', o.optLong("used", 0L),
+                        o.optBoolean("disabled", false)))
+                }
+            }
+        } catch (_: Throwable) { emptyList() }
+    }
+
+    private fun saveCachedItems(items: List<Item>) {
+        try {
+            val array = JSONArray()
+            for (item in items) {
+                val file = iconFile(item.pkg, item.user)
+                if (!file.exists()) file.outputStream().use {
+                    item.icon.asAndroidBitmap().compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it)
+                }
+                array.put(JSONObject().apply {
+                    put("pkg", item.pkg); put("user", item.user); put("label", item.label)
+                    put("initial", item.initial.toString()); put("used", item.used); put("disabled", item.disabled)
+                })
+            }
+            prefs.edit().putString("items_cache", array.toString()).apply()
+        } catch (_: Throwable) {}
+    }
+
+    private fun isPackageDisabled(item: Item): Boolean =
+        Sh.run("pm list packages -d --user ${item.user} ${item.pkg}")
+            .lineSequence().any { it.trim() == "package:${item.pkg}" }
+
+    private fun loadItems(cachedItems: List<Item> = loadCachedItems()): List<Item> {
+        val cached = cachedItems.associateBy { it.key }
         val users = Regex("UserInfo\\{(\\d+):").findAll(Sh.run("pm list users")).map { it.groupValues[1].toInt() }.toList()
             .ifEmpty { listOf(0) }
-        val usage = (getSystemService(Context.USAGE_STATS_SERVICE) as UsageStatsManager)
-            .queryAndAggregateUsageStats(
-                System.currentTimeMillis() - 30L * 86400000,
-                System.currentTimeMillis(),
-            )
-            .mapValues { it.value.totalTimeInForeground }
+        val usage = if (hasUsageAccess()) {
+            (getSystemService(Context.USAGE_STATS_SERVICE) as UsageStatsManager)
+                .queryAndAggregateUsageStats(
+                    System.currentTimeMillis() - 30L * 86400000,
+                    System.currentTimeMillis(),
+                ).mapValues { it.value.totalTimeInForeground }
+        } else emptyMap()
         val out = ArrayList<Item>()
         for (u in users) {
             val all = Sh.run("pm list packages -3 --user $u").lines().mapNotNull { it.removePrefix("package:").trim().ifEmpty { null } }
@@ -107,10 +156,15 @@ class MainActivity : ComponentActivity() {
             for (p in all) {
                 if (p == packageName) continue
                 try {
-                    val info = packageManager.getApplicationInfo(p, 0)
-                    val label = packageManager.getApplicationLabel(info).toString()
-                    val icon = packageManager.getApplicationIcon(info).toBitmap(96, 96).asImageBitmap()
-                    out += Item(p, u, label, icon, initialOf(label), usage[p] ?: 0L, p in dis)
+                    val old = cached["$p:$u"]
+                    if (old != null) {
+                        out += old.copy(used = usage[p] ?: 0L, disabled = p in dis)
+                    } else {
+                        val info = packageManager.getApplicationInfo(p, 0)
+                        val label = packageManager.getApplicationLabel(info).toString()
+                        val icon = packageManager.getApplicationIcon(info).toBitmap(96, 96).asImageBitmap()
+                        out += Item(p, u, label, icon, initialOf(label), usage[p] ?: 0L, p in dis)
+                    }
                 } catch (_: Throwable) {}
             }
         }
@@ -160,21 +214,43 @@ class MainActivity : ComponentActivity() {
             var filter by remember { mutableStateOf<Char?>(null) }
             val leftState = rememberLazyListState()
             var needReload by remember { mutableStateOf(true) }
+            val disabledOverrides = remember { mutableStateMapOf<String, Boolean>() }
+            val refreshMutex = remember { kotlinx.coroutines.sync.Mutex() }
+
+            suspend fun refreshAll() {
+                refreshMutex.withLock {
+                    val cached = withContext(Dispatchers.IO) { loadCachedItems() }
+                    if (cached.isNotEmpty()) {
+                        items = cached
+                        cached.forEach { disabledOverrides[it.key] = it.disabled }
+                    }
+                    if (granted()) {
+                        val fresh = withContext(Dispatchers.IO) { loadItems(cached) }
+                        items = fresh
+                        disabledOverrides.clear()
+                        fresh.forEach { disabledOverrides[it.key] = it.disabled }
+                        withContext(Dispatchers.IO) { saveCachedItems(fresh) }
+                        needReload = false
+                    }
+                    running = withContext(Dispatchers.IO) { runningKeys() }
+                }
+            }
 
             LaunchedEffect(filter) {
                 if (filter == null) leftState.scrollToItem(0)
             }
 
             LaunchedEffect(Unit) {
+                refreshAll()
+                var previousUsageAccess = hasUsageAccess()
                 while (true) {
-                    withContext(Dispatchers.IO) {
-                        if (granted()) {
-                            if (hasUsageAccess()) {
-                                if (needReload) { items = loadItems(); needReload = false }
-                            }
-                            running = runningKeys()
-                        } else if (Shizuku.pingBinder()) Shizuku.requestPermission(0)
-                    }
+                    if (granted()) {
+                        val usageAccess = hasUsageAccess()
+                        if (usageAccess && !previousUsageAccess) needReload = true
+                        previousUsageAccess = usageAccess
+                        if (needReload) refreshAll()
+                        running = withContext(Dispatchers.IO) { runningKeys() }
+                    } else if (Shizuku.pingBinder()) Shizuku.requestPermission(0)
                     val now = System.currentTimeMillis()
                     launched.entries.removeAll { it.key !in running && now - it.value > 6000 }
                     delay(2000)
@@ -186,6 +262,15 @@ class MainActivity : ComponentActivity() {
                 prefs.edit().putStringSet("white", white).apply()
             }
             fun act(block: () -> Unit) = scope.launch(Dispatchers.IO) { block(); needReload = true }
+            fun act(item: Item, block: () -> Unit) = scope.launch(Dispatchers.IO) {
+                block()
+                val disabled = isPackageDisabled(item)
+                withContext(Dispatchers.Main) {
+                    disabledOverrides[item.key] = disabled
+                    items = items.map { if (it.key == item.key) it.copy(disabled = disabled) else it }
+                    needReload = true
+                }
+            }
 
             val left = items.filter { filter == null || it.initial == filter }
             val right = items.filter { it.key in launched && it.key in running }
@@ -194,12 +279,12 @@ class MainActivity : ComponentActivity() {
                 Column(Modifier.fillMaxSize()) {
                     Spacer(Modifier.height(48.dp))
                     Row(Modifier.weight(1f).fillMaxWidth()) {
-                        AppList(left, white, leftState, Modifier.weight(1f).padding(end = 14.dp), 0.dp,
-                            { i -> act { launch(i); launched[i.key] = System.currentTimeMillis() } },
+                        AppList(left, white, disabledOverrides, leftState, Modifier.weight(1f).padding(end = 14.dp), 0.dp,
+                            { i -> act(i) { launch(i); launched[i.key] = System.currentTimeMillis() } },
                             { i -> toggleWhite(i.pkg) })
-                        AppList(right, white, rememberLazyListState(), Modifier.weight(1f).padding(start = 14.dp), 56.dp,
-                            { i -> act { launch(i) } },
-                            { i -> act { freeze(i) } })
+                        AppList(right, white, disabledOverrides, rememberLazyListState(), Modifier.weight(1f).padding(start = 14.dp), 56.dp,
+                            { i -> act(i) { launch(i) } },
+                            { i -> act(i) { freeze(i) } })
                     }
                 }
                 Column(
@@ -212,9 +297,7 @@ class MainActivity : ComponentActivity() {
                                 detectTapGestures(
                                     onTap = { filter = c },
                                     onLongPress = {
-                                        filter = null
-                                        needReload = true
-                                        scope.launch { leftState.scrollToItem(0) }
+                                        scope.launch { refreshAll() }
                                     },
                                 )
                             },
@@ -247,7 +330,8 @@ class MainActivity : ComponentActivity() {
 
 @Composable
 fun AppList(
-    list: List<Item>, white: Set<String>, state: androidx.compose.foundation.lazy.LazyListState,
+    list: List<Item>, white: Set<String>, disabledOverrides: Map<String, Boolean>,
+    state: androidx.compose.foundation.lazy.LazyListState,
     modifier: Modifier, bottomPad: androidx.compose.ui.unit.Dp,
     onClick: (Item) -> Unit, onLong: (Item) -> Unit,
 ) {
@@ -261,8 +345,9 @@ fun AppList(
     LazyColumn(modifier, state, contentPadding = PaddingValues(bottom = bottomPad)) {
         items(list, key = { it.key }) { it ->
             val cur by rememberUpdatedState(it)
+            val disabledNow = disabledOverrides[it.key] ?: it.disabled
             Row(
-                Modifier.fillMaxWidth().padding(vertical = 4.dp).alpha(if (it.disabled) 0.3f else 1f)
+                Modifier.fillMaxWidth().padding(vertical = 4.dp).alpha(if (disabledNow) 0.3f else 1f)
                     .pointerInput(Unit) {
                         detectTapGestures(
                             onTap = { onClick(cur) },
