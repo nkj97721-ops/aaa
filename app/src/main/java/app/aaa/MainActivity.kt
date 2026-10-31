@@ -335,7 +335,7 @@ class MainActivity : ComponentActivity() {
                     }
                 }
                 Box(
-                    Modifier.align(Alignment.BottomStart).fillMaxWidth(0.5f).height(56.dp)
+                    Modifier.align(Alignment.BottomStart).fillMaxWidth(0.5f).padding(end = 20.dp).height(56.dp)
                         .clickable {
                             scope.launch {
                                 refreshAll()
@@ -346,7 +346,7 @@ class MainActivity : ComponentActivity() {
                     contentAlignment = Alignment.Center,
                 ) { T("刷新", c = Color.White, s = 16) }
                 Box(
-                    Modifier.align(Alignment.BottomEnd).fillMaxWidth(0.5f).height(56.dp)
+                    Modifier.align(Alignment.BottomEnd).fillMaxWidth(0.5f).padding(start = 20.dp).height(56.dp)
                         .pointerInput(right, white) {
                             detectTapGestures(onTap = {
                                 val targets = right.filter { it.key !in white }
