@@ -23,7 +23,6 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.runtime.*
-import androidx.compose.runtime.snapshots.SnapshotStateMap
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -39,7 +38,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.graphics.drawable.toBitmap
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
@@ -252,8 +250,7 @@ class MainActivity : ComponentActivity() {
             }
             var filter by remember { mutableStateOf<Char?>(null) }
             val leftState = rememberLazyListState()
-            var needReload by remember { mutableStateOf(true) }
-                        val refreshMutex = remember { kotlinx.coroutines.sync.Mutex() }
+            val refreshMutex = remember { kotlinx.coroutines.sync.Mutex() }
 
             suspend fun refreshAll() {
                 refreshMutex.withLock {
@@ -265,7 +262,6 @@ class MainActivity : ComponentActivity() {
                         val fresh = withContext(Dispatchers.IO) { loadItems(cached) }
                         items = fresh
                          withContext(Dispatchers.IO) { saveCachedItems(fresh) }
-                        needReload = false
                     }
                 }
             }
@@ -276,16 +272,6 @@ class MainActivity : ComponentActivity() {
 
             LaunchedEffect(Unit) {
                 refreshAll()
-                var previousUsageAccess = hasUsageAccess()
-                while (true) {
-                    if (granted()) {
-                        val usageAccess = hasUsageAccess()
-                        if (usageAccess && !previousUsageAccess) needReload = true
-                        previousUsageAccess = usageAccess
-                        if (needReload) refreshAll()
-                    } else if (Shizuku.pingBinder()) Shizuku.requestPermission(0)
-                    delay(2000)
-                }
             }
 
             fun toggleWhite(item: Item) {
@@ -293,7 +279,6 @@ class MainActivity : ComponentActivity() {
                 white = if (key in white) white - key else white + key
                 prefs.edit().putStringSet("white", white).apply()
             }
-            fun act(block: () -> Unit) = scope.launch(Dispatchers.IO) { block(); needReload = true }
             fun act(item: Item, block: () -> Unit) = scope.launch(Dispatchers.IO) {
                 block()
                 val disabled = isPackageDisabled(item)
@@ -302,7 +287,7 @@ class MainActivity : ComponentActivity() {
                 }
             }
 
-            val left = items.filter { filter == null || it.initial == filter }
+            val left = items.filter { filter == null || it.initial == filter }.take(30)
             val right = items.filter { it.key in launched && !it.disabled }
 
             Box(Modifier.fillMaxSize().background(Color.Black)) {
@@ -349,6 +334,17 @@ class MainActivity : ComponentActivity() {
                         }
                     }
                 }
+                Box(
+                    Modifier.align(Alignment.BottomStart).fillMaxWidth(0.5f).height(56.dp)
+                        .clickable {
+                            scope.launch {
+                                refreshAll()
+                                filter = null
+                                leftState.scrollToItem(0)
+                            }
+                        },
+                    contentAlignment = Alignment.Center,
+                ) { T("刷新", c = Color.White, s = 16) }
                 Box(
                     Modifier.align(Alignment.BottomEnd).fillMaxWidth(0.5f).height(56.dp)
                         .pointerInput(right, white) {
