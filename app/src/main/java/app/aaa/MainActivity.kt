@@ -250,6 +250,7 @@ class MainActivity : ComponentActivity() {
             }
             var filter by remember { mutableStateOf<Char?>(null) }
             var leftListGeneration by remember { mutableIntStateOf(0) }
+            var leftVisible by remember { mutableStateOf(true) }
             val refreshMutex = remember { kotlinx.coroutines.sync.Mutex() }
 
             suspend fun refreshAll() {
@@ -314,7 +315,7 @@ class MainActivity : ComponentActivity() {
                 Column(Modifier.fillMaxSize()) {
                     Spacer(Modifier.height(48.dp))
                     Row(Modifier.weight(1f).fillMaxWidth()) {
-                        key(leftListGeneration) {
+                        if (leftVisible) key(leftListGeneration) {
                             AppList(left, white, rememberLazyListState(), Modifier.weight(1f).padding(end = 20.dp), 0.dp,
                                 { i -> act(i) {
                                     if (launch(i)) {
@@ -361,9 +362,15 @@ class MainActivity : ComponentActivity() {
                 Box(
                     Modifier.align(Alignment.BottomStart).fillMaxWidth(0.5f).padding(end = 20.dp).height(56.dp)
                         .clickable {
+                            if (!leftVisible) return@clickable
+                            leftVisible = false
+                            filter = null
                             scope.launch {
-                                filter = null
-                                refreshAll()
+                                try {
+                                    refreshAll()
+                                } finally {
+                                    leftVisible = true
+                                }
                             }
                         },
                     contentAlignment = Alignment.Center,
