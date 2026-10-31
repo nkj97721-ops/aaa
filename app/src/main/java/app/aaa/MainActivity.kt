@@ -76,7 +76,7 @@ class MainActivity : ComponentActivity() {
 
     private fun tryGrantUsageAccess(): Boolean {
         if (hasUsageAccess()) return true
-        val userId = android.os.Process.myUserHandle().identifier
+        val userId = android.os.UserHandle.getUserId(android.os.Process.myUid())
         Sh.run("cmd appops set --user $userId $packageName GET_USAGE_STATS allow")
         return hasUsageAccess()
     }
