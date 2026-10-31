@@ -196,8 +196,8 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    private fun freeze(it: Item) {
-        Sh.run("am force-stop --user ${it.user} ${it.pkg}; pm disable-user --user ${it.user} ${it.pkg}")
+    private fun stopApp(it: Item) {
+        Sh.run("am force-stop --user ${it.user} ${it.pkg}")
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -211,26 +211,31 @@ class MainActivity : ComponentActivity() {
             var items by remember { mutableStateOf<List<Item>>(emptyList()) }
             var running by remember { mutableStateOf<Set<String>>(emptySet()) }
             val launched = remember { mutableStateMapOf<String, Long>() }
-            var white by remember { mutableStateOf(prefs.getStringSet("white", emptySet())!!.toSet()) }
+            var white by remember {
+                mutableStateOf(
+                    prefs.getStringSet("white", emptySet())!!.map { key ->
+                        if (':' in key) key else "$key:0"
+                    }.toSet()
+                )
+            }
+            LaunchedEffect(Unit) {
+                prefs.edit().putStringSet("white", white).apply()
+            }
             var filter by remember { mutableStateOf<Char?>(null) }
             val leftState = rememberLazyListState()
             var needReload by remember { mutableStateOf(true) }
-            val disabledOverrides = remember { mutableStateMapOf<String, Boolean>() }
-            val refreshMutex = remember { kotlinx.coroutines.sync.Mutex() }
+                        val refreshMutex = remember { kotlinx.coroutines.sync.Mutex() }
 
             suspend fun refreshAll() {
                 refreshMutex.withLock {
                     val cached = withContext(Dispatchers.IO) { loadCachedItems() }
                     if (cached.isNotEmpty()) {
                         items = cached
-                        cached.forEach { disabledOverrides[it.key] = it.disabled }
-                    }
+                     }
                     if (granted()) {
                         val fresh = withContext(Dispatchers.IO) { loadItems(cached) }
                         items = fresh
-                        disabledOverrides.clear()
-                        fresh.forEach { disabledOverrides[it.key] = it.disabled }
-                        withContext(Dispatchers.IO) { saveCachedItems(fresh) }
+                         withContext(Dispatchers.IO) { saveCachedItems(fresh) }
                         needReload = false
                     }
                     running = withContext(Dispatchers.IO) { runningKeys() }
@@ -258,18 +263,19 @@ class MainActivity : ComponentActivity() {
                 }
             }
 
-            fun toggleWhite(p: String) {
-                white = if (p in white) white - p else white + p
+            fun toggleWhite(item: Item) {
+                val key = item.key
+                white = if (key in white) white - key else white + key
                 prefs.edit().putStringSet("white", white).apply()
             }
             fun act(block: () -> Unit) = scope.launch(Dispatchers.IO) { block(); needReload = true }
             fun act(item: Item, block: () -> Unit) = scope.launch(Dispatchers.IO) {
                 block()
                 val disabled = isPackageDisabled(item)
+                val currentRunning = withContext(Dispatchers.IO) { runningKeys() }
                 withContext(Dispatchers.Main) {
-                    disabledOverrides[item.key] = disabled
                     items = items.map { if (it.key == item.key) it.copy(disabled = disabled) else it }
-                    needReload = true
+                    running = currentRunning
                 }
             }
 
@@ -280,12 +286,12 @@ class MainActivity : ComponentActivity() {
                 Column(Modifier.fillMaxSize()) {
                     Spacer(Modifier.height(48.dp))
                     Row(Modifier.weight(1f).fillMaxWidth()) {
-                        AppList(left, white, disabledOverrides, leftState, Modifier.weight(1f).padding(end = 14.dp), 0.dp,
+                        AppList(left, white, leftState, Modifier.weight(1f).padding(end = 14.dp), 0.dp,
                             { i -> act(i) { launch(i); launched[i.key] = System.currentTimeMillis() } },
-                            { i -> toggleWhite(i.pkg) })
-                        AppList(right, white, disabledOverrides, rememberLazyListState(), Modifier.weight(1f).padding(start = 14.dp), 56.dp,
+                            { i -> toggleWhite(i) })
+                        AppList(right, white, rememberLazyListState(), Modifier.weight(1f).padding(start = 14.dp), 56.dp,
                             { i -> act(i) { launch(i) } },
-                            { i -> act(i) { freeze(i) } })
+                            { i -> act(i) { stopApp(i); launched.remove(i.key) } })
                     }
                 }
                 Column(
@@ -297,9 +303,6 @@ class MainActivity : ComponentActivity() {
                             Modifier.weight(1f).fillMaxWidth().pointerInput(c) {
                                 detectTapGestures(
                                     onTap = { filter = c },
-                                    onLongPress = {
-                                        scope.launch { refreshAll() }
-                                    },
                                 )
                             },
                             contentAlignment = Alignment.Center,
@@ -313,17 +316,16 @@ class MainActivity : ComponentActivity() {
                         .pointerInput(right, white) {
                             detectTapGestures(onTap = {
                                 act {
-                                    val targets = right.filter { it.pkg !in white }
+                                    val targets = right.filter { it.key !in white }
                                     val command = targets.joinToString("; ") { item ->
-                                        "am force-stop --user ${item.user} ${item.pkg} >/dev/null 2>&1; " +
-                                            "pm disable-user --user ${item.user} ${item.pkg} >/dev/null 2>&1"
+                                        "am force-stop --user ${item.user} ${item.pkg} >/dev/null 2>&1"
                                     }
                                     if (command.isNotBlank()) Sh.run(command)
                                 }
                             })
                         },
                     contentAlignment = Alignment.Center,
-                ) { T("停用", c = Color.White, s = 16) }
+                 ) { T("停止", c = Color.White, s = 16) }
             }
         }
     }
@@ -331,7 +333,7 @@ class MainActivity : ComponentActivity() {
 
 @Composable
 fun AppList(
-    list: List<Item>, white: Set<String>, disabledOverrides: Map<String, Boolean>,
+    list: List<Item>, white: Set<String>,
     state: androidx.compose.foundation.lazy.LazyListState,
     modifier: Modifier, bottomPad: androidx.compose.ui.unit.Dp,
     onClick: (Item) -> Unit, onLong: (Item) -> Unit,
@@ -346,7 +348,7 @@ fun AppList(
     LazyColumn(modifier, state, contentPadding = PaddingValues(bottom = bottomPad)) {
         items(list, key = { it.key }) { it ->
             val cur by rememberUpdatedState(it)
-            val disabledNow = disabledOverrides[it.key] ?: it.disabled
+            val disabledNow = it.disabled
             Row(
                 Modifier.fillMaxWidth().padding(vertical = 4.dp).alpha(if (disabledNow) 0.3f else 1f)
                     .pointerInput(Unit) {
@@ -358,7 +360,7 @@ fun AppList(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.Center,
             ) {
-                T(if (it.pkg in white) "☆" else "", c = Color.White, s = 12, modifier = Modifier.width(14.dp))
+                T(if (it.key in white) "☆" else "", c = Color.White, s = 12, modifier = Modifier.width(14.dp))
                 Box {
                     Image(it.icon, null, Modifier.size(36.dp))
                     if (it.user != 0) T(
