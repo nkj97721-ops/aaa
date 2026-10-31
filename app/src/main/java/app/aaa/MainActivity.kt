@@ -23,6 +23,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalViewConfiguration
+import androidx.compose.ui.platform.ViewConfiguration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -70,8 +72,11 @@ class MainActivity : ComponentActivity() {
         val users = Regex("UserInfo\\{(\\d+):").findAll(Sh.run("pm list users")).map { it.groupValues[1].toInt() }.toList()
             .ifEmpty { listOf(0) }
         val usage = (getSystemService(Context.USAGE_STATS_SERVICE) as UsageStatsManager)
-            .queryUsageStats(UsageStatsManager.INTERVAL_BEST, System.currentTimeMillis() - 30L * 86400000, System.currentTimeMillis())
-            .groupBy { it.packageName }.mapValues { e -> e.value.sumOf { it.totalTimeInForeground } }
+            .queryAndAggregateUsageStats(
+                System.currentTimeMillis() - 30L * 86400000,
+                System.currentTimeMillis(),
+            )
+            .mapValues { it.value.totalTimeInForeground }
         val out = ArrayList<Item>()
         for (u in users) {
             val all = Sh.run("pm list packages -3 --user $u").lines().mapNotNull { it.removePrefix("package:").trim().ifEmpty { null } }
@@ -130,9 +135,12 @@ class MainActivity : ComponentActivity() {
             val launched = remember { mutableStateMapOf<String, Long>() }
             var white by remember { mutableStateOf(prefs.getStringSet("white", emptySet())!!.toSet()) }
             var filter by remember { mutableStateOf<Char?>(null) }
-            var top by remember { mutableStateOf<String?>(null) }
             val leftState = rememberLazyListState()
             var needReload by remember { mutableStateOf(true) }
+
+            LaunchedEffect(filter) {
+                if (filter == null) leftState.scrollToItem(0)
+            }
 
             LaunchedEffect(Unit) {
                 withContext(Dispatchers.IO) {
@@ -165,11 +173,9 @@ class MainActivity : ComponentActivity() {
                     Spacer(Modifier.height(48.dp))
                     Row(Modifier.weight(1f).fillMaxWidth()) {
                         AppList(left, white, leftState, Modifier.weight(1f).padding(end = 14.dp), 0.dp,
-                            { top = it?.pkg },
                             { i -> act { launch(i); launched[i.key] = System.currentTimeMillis() } },
                             { i -> toggleWhite(i.pkg) })
                         AppList(right, white, rememberLazyListState(), Modifier.weight(1f).padding(start = 14.dp), 56.dp,
-                            { top = it?.pkg },
                             { i -> act { launch(i) } },
                             { i -> act { freeze(i) } })
                     }
@@ -183,7 +189,7 @@ class MainActivity : ComponentActivity() {
                             Modifier.weight(1f).fillMaxWidth().pointerInput(c) {
                                 detectTapGestures(
                                     onTap = { filter = c },
-                                    onLongPress = { filter = null; scope.launch { leftState.scrollToItem(0) } },
+                                    onLongPress = { filter = null },
                                 )
                             },
                             contentAlignment = Alignment.Center,
@@ -201,9 +207,6 @@ class MainActivity : ComponentActivity() {
                         },
                     contentAlignment = Alignment.Center,
                 ) { T("停用", c = Color.White, s = 16) }
-                top?.let {
-                    T(it, c = Color(0xFFAAAAAA), s = 8, modifier = Modifier.align(Alignment.TopCenter))
-                }
             }
         }
     }
@@ -213,8 +216,15 @@ class MainActivity : ComponentActivity() {
 fun AppList(
     list: List<Item>, white: Set<String>, state: androidx.compose.foundation.lazy.LazyListState,
     modifier: Modifier, bottomPad: androidx.compose.ui.unit.Dp,
-    onTouch: (Item?) -> Unit, onClick: (Item) -> Unit, onLong: (Item) -> Unit,
+    onClick: (Item) -> Unit, onLong: (Item) -> Unit,
 ) {
+    val baseViewConfiguration = LocalViewConfiguration.current
+    val quickLongPressConfiguration = remember(baseViewConfiguration) {
+        object : ViewConfiguration by baseViewConfiguration {
+            override val longPressTimeoutMillis: Long = 300L
+        }
+    }
+    CompositionLocalProvider(LocalViewConfiguration provides quickLongPressConfiguration) {
     LazyColumn(modifier, state, contentPadding = PaddingValues(bottom = bottomPad)) {
         items(list, key = { it.key }) { it ->
             val cur by rememberUpdatedState(it)
@@ -222,7 +232,6 @@ fun AppList(
                 Modifier.fillMaxWidth().padding(vertical = 4.dp).alpha(if (it.disabled) 0.3f else 1f)
                     .pointerInput(Unit) {
                         detectTapGestures(
-                            onPress = { onTouch(cur); tryAwaitRelease(); onTouch(null) },
                             onTap = { onClick(cur) },
                             onLongPress = { onLong(cur) },
                         )
@@ -235,13 +244,14 @@ fun AppList(
                     Image(it.icon, null, Modifier.size(36.dp))
                     if (it.user != 0) T(
                         it.user.toString(), c = Color.Black, s = 8,
-                        modifier = Modifier.align(Alignment.BottomEnd).background(Color(0xFF39D353)).padding(horizontal = 2.dp),
+                        modifier = Modifier.align(Alignment.BottomEnd).background(Color(0xFF00FF00)).padding(horizontal = 2.dp),
                     )
                 }
                 Spacer(Modifier.width(6.dp))
                 T(it.label, c = Color.White, s = 12, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
         }
+    }
     }
 }
 
