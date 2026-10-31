@@ -7,11 +7,11 @@ android {
     namespace = "app.aaa"
     compileSdk = 35
     defaultConfig {
-        applicationId = "app.aaa"
+        applicationId = "app.c11010250"
         minSdk = 29
         targetSdk = 35
-        versionCode = 1
-        versionName = "1.0"
+        versionCode = 11010250
+        versionName = "11010250"
     }
     compileOptions { sourceCompatibility = JavaVersion.VERSION_17; targetCompatibility = JavaVersion.VERSION_17 }
     kotlinOptions { jvmTarget = "17" }
