@@ -1,11 +1,7 @@
 package app.aaa
 
-import android.app.usage.UsageStatsManager
 import android.content.Context
-import android.content.Intent
 import android.content.pm.PackageManager
-import android.app.AppOpsManager
-import android.provider.Settings
 import android.os.Bundle
 import android.graphics.BitmapFactory
 import org.json.JSONArray
@@ -46,7 +42,7 @@ import rikka.shizuku.Shizuku
 
 data class Item(
     val pkg: String, val user: Int, val label: String, val icon: ImageBitmap,
-    val initial: Char, val used: Long, val disabled: Boolean,
+    val initial: Char, val disabled: Boolean,
 ) { val key get() = "$pkg:$user" }
 
 object Sh {
@@ -65,16 +61,6 @@ object Sh {
 class MainActivity : ComponentActivity() {
     private val tr by lazy { android.icu.text.Transliterator.getInstance("Han-Latin; Latin-ASCII") }
     private val prefs by lazy { getSharedPreferences("p", Context.MODE_PRIVATE) }
-    private fun hasUsageAccess(): Boolean {
-        val appOps = getSystemService(Context.APP_OPS_SERVICE) as AppOpsManager
-        return appOps.checkOpNoThrow(
-            AppOpsManager.OPSTR_GET_USAGE_STATS,
-            android.os.Process.myUid(),
-            packageName,
-        ) == AppOpsManager.MODE_ALLOWED
-    }
-
-
     private fun initialOf(s: String): Char {
         val first = s.trim().firstOrNull() ?: return '#'
         val digits = mapOf('0' to 'L', '1' to 'Y', '2' to 'E', '3' to 'S', '4' to 'S', '5' to 'W', '6' to 'L', '7' to 'Q', '8' to 'B', '9' to 'J')
@@ -100,7 +86,7 @@ class MainActivity : ComponentActivity() {
                     val user = o.getInt("user")
                     val bitmap = BitmapFactory.decodeFile(iconFile(pkg, user).absolutePath) ?: continue
                     add(Item(pkg, user, o.getString("label"), bitmap.asImageBitmap(),
-                        o.getString("initial").firstOrNull() ?: '#', o.optLong("used", 0L),
+                        o.getString("initial").firstOrNull() ?: '#',
                         o.optBoolean("disabled", false)))
                 }
             }
@@ -117,7 +103,7 @@ class MainActivity : ComponentActivity() {
                 }
                 array.put(JSONObject().apply {
                     put("pkg", item.pkg); put("user", item.user); put("label", item.label)
-                    put("initial", item.initial.toString()); put("used", item.used); put("disabled", item.disabled)
+                    put("initial", item.initial.toString()); put("disabled", item.disabled)
                 })
             }
             prefs.edit().putString("items_cache", array.toString()).apply()
@@ -132,13 +118,6 @@ class MainActivity : ComponentActivity() {
         val cached = cachedItems.associateBy { it.key }
         val users = Regex("UserInfo\\{(\\d+):").findAll(Sh.run("pm list users")).map { it.groupValues[1].toInt() }.toList()
             .ifEmpty { listOf(0) }
-        val usage = if (hasUsageAccess()) {
-            (getSystemService(Context.USAGE_STATS_SERVICE) as UsageStatsManager)
-                .queryAndAggregateUsageStats(
-                    System.currentTimeMillis() - 30L * 86400000,
-                    System.currentTimeMillis(),
-                ).mapValues { it.value.totalTimeInForeground }
-        } else emptyMap()
         val out = ArrayList<Item>()
         for (u in users) {
             val all = Sh.run("pm list packages -3 --user $u").lines().mapNotNull { it.removePrefix("package:").trim().ifEmpty { null } }
@@ -148,17 +127,17 @@ class MainActivity : ComponentActivity() {
                 try {
                     val old = cached["$p:$u"]
                     if (old != null) {
-                        out += old.copy(used = usage[p] ?: 0L, disabled = p in dis)
+                        out += old.copy(disabled = p in dis)
                     } else {
                         val info = packageManager.getApplicationInfo(p, 0)
                         val label = packageManager.getApplicationLabel(info).toString()
                         val icon = packageManager.getApplicationIcon(info).toBitmap(96, 96).asImageBitmap()
-                        out += Item(p, u, label, icon, initialOf(label), usage[p] ?: 0L, p in dis)
+                        out += Item(p, u, label, icon, initialOf(label), p in dis)
                     }
                 } catch (_: Throwable) {}
             }
         }
-        return out.sortedByDescending { it.used }
+        return out
     }
 
     private fun launch(it: Item): Boolean {
@@ -260,10 +239,6 @@ class MainActivity : ComponentActivity() {
                         Shizuku.requestPermission(0)
                         return@withLock
                     }
-                    if (!hasUsageAccess()) {
-                        startActivity(Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS))
-                    }
-
                     val fresh = withContext(Dispatchers.IO) { loadItems(cached) }
                     items = fresh
                     withContext(Dispatchers.IO) { saveCachedItems(fresh) }
