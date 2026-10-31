@@ -294,7 +294,7 @@ class MainActivity : ComponentActivity() {
                 Column(Modifier.fillMaxSize()) {
                     Spacer(Modifier.height(48.dp))
                     Row(Modifier.weight(1f).fillMaxWidth()) {
-                        AppList(left, white, leftState, Modifier.weight(1f).padding(end = 14.dp), 0.dp,
+                        AppList(left, white, leftState, Modifier.weight(1f).padding(end = 20.dp), 0.dp,
                             { i -> act(i) {
                                 if (launch(i)) {
                                     launched[i.key] = System.currentTimeMillis()
@@ -308,7 +308,7 @@ class MainActivity : ComponentActivity() {
                                 }
                             } },
                             { i -> toggleWhite(i) })
-                        AppList(right, white, rememberLazyListState(), Modifier.weight(1f).padding(start = 14.dp), 56.dp,
+                        AppList(right, white, rememberLazyListState(), Modifier.weight(1f).padding(start = 20.dp), 56.dp,
                             { i -> act(i) {
                                 if (!launch(i)) runOnUiThread {
                                     android.widget.Toast.makeText(
@@ -321,7 +321,7 @@ class MainActivity : ComponentActivity() {
                     }
                 }
                 Column(
-                    Modifier.align(Alignment.Center).fillMaxHeight().width(28.dp).padding(top = 48.dp, bottom = 8.dp),
+                    Modifier.align(Alignment.Center).fillMaxHeight().width(40.dp).padding(top = 48.dp, bottom = 8.dp),
                     verticalArrangement = Arrangement.SpaceEvenly,
                 ) {
                     ("ABCDEFGHIJKLMNOPQRSTUVWXYZ").forEach { c ->
