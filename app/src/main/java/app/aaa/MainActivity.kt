@@ -316,7 +316,7 @@ class MainActivity : ComponentActivity() {
                     Spacer(Modifier.height(48.dp))
                     Row(Modifier.weight(1f).fillMaxWidth()) {
                         if (leftVisible) key(leftListGeneration) {
-                            AppList(left, white, rememberLazyListState(), Modifier.weight(1f).padding(end = 20.dp), 0.dp,
+                            AppList(left, white, rememberLazyListState(), Modifier.weight(1f).padding(end = 20.dp), 56.dp,
                                 { i -> act(i) {
                                     if (launch(i)) {
                                         launched[i.key] = System.currentTimeMillis()
