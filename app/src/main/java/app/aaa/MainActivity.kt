@@ -251,13 +251,11 @@ class MainActivity : ComponentActivity() {
             var filter by remember { mutableStateOf<Char?>(null) }
             var leftListGeneration by remember { mutableIntStateOf(0) }
             var leftVisible by remember { mutableStateOf(true) }
+            var refreshInProgress by remember { mutableStateOf(false) }
             val refreshMutex = remember { kotlinx.coroutines.sync.Mutex() }
 
             suspend fun refreshAll() {
                 refreshMutex.withLock {
-                    val cached = withContext(Dispatchers.IO) { loadCachedItems() }
-                    if (cached.isNotEmpty()) items = cached
-
                     // Permission checks and permission prompts happen only after
                     // the user presses Refresh, never during startup or onResume.
                     if (!Shizuku.pingBinder()) {
@@ -273,14 +271,16 @@ class MainActivity : ComponentActivity() {
                         Shizuku.requestPermission(0)
                         return@withLock
                     }
-                    if (!tryGrantUsageAccess()) {
+                    if (!withContext(Dispatchers.IO) { tryGrantUsageAccess() }) {
                         startActivity(Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS))
                         return@withLock
                     }
 
-                    val fresh = withContext(Dispatchers.IO) { loadItems(cached) }
+                    // The cached list is already visible. Scan and update it in the
+                    // background without resetting the user's current scroll position.
+                    val currentItems = items
+                    val fresh = withContext(Dispatchers.IO) { loadItems(currentItems) }
                     items = fresh
-                    leftListGeneration++
                     withContext(Dispatchers.IO) { saveCachedItems(fresh) }
                 }
             }
@@ -364,14 +364,25 @@ class MainActivity : ComponentActivity() {
                 Box(
                     Modifier.align(Alignment.BottomStart).fillMaxWidth(0.5f).padding(end = 20.dp).height(56.dp)
                         .clickable {
-                            if (!leftVisible) return@clickable
+                            if (refreshInProgress) return@clickable
+                            refreshInProgress = true
                             leftVisible = false
                             filter = null
                             scope.launch {
                                 try {
+                                    // Reload the saved default order first. Show it before
+                                    // starting any Shizuku/system package scan.
+                                    val cached = withContext(Dispatchers.IO) { loadCachedItems() }
+                                    items = cached
+                                    leftListGeneration++
+                                    leftVisible = true
+                                    // Give Compose a frame to draw the restored list
+                                    // before the slower permission checks and scan begin.
+                                    withFrameNanos { }
                                     refreshAll()
                                 } finally {
                                     leftVisible = true
+                                    refreshInProgress = false
                                 }
                             }
                         },
