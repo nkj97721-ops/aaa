@@ -47,7 +47,7 @@ import rikka.shizuku.Shizuku
 data class Item(
     val pkg: String, val user: Int, val label: String, val icon: ImageBitmap,
     val initial: Char, val used: Long, val disabled: Boolean,
-) { val key get() = "$pkg:$user" }
+) { val key get() = appIdentityKey(pkg, user) }
 
 object Sh {
     private val m by lazy {
