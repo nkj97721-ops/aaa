@@ -73,6 +73,7 @@ class MainActivity : Activity() {
     private lateinit var leftColumn: LinearLayout
     private lateinit var rightColumn: LinearLayout
     private lateinit var refreshButton: TextView
+    private lateinit var lettersBar: LinearLayout
     private lateinit var bulkDisableButton: TextView
     private var rowHeight = 48
 
@@ -230,9 +231,12 @@ class MainActivity : Activity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        window.statusBarColor = BLACK
-        window.navigationBarColor = BLACK
-        window.decorView.systemUiVisibility = 0
+        window.statusBarColor = Color.TRANSPARENT
+        window.navigationBarColor = Color.TRANSPARENT
+        window.decorView.systemUiVisibility =
+            View.SYSTEM_UI_FLAG_LAYOUT_STABLE or
+            View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN or
+            View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
         white.addAll(prefs.getStringSet("white", emptySet())!!.map { key ->
             if (':' in key) key else "$key:0"
         })
@@ -271,13 +275,14 @@ class MainActivity : Activity() {
             orientation = LinearLayout.VERTICAL
             gravity = android.view.Gravity.CENTER
         }
+        lettersBar = letters
         ("ABCDEFGHIJKLMNOPQRSTUVWXYZ").forEach { ch ->
             val letter = text(ch.toString(), 11f, GREY)
             letters.addView(letter, LinearLayout.LayoutParams(-1, 0, 1f))
             letter.setOnClickListener {
                 filter = ch
                 renderLeft()
-                letters.childrenTextColor(filter)
+                lettersBar.childrenTextColor(filter)
             }
         }
         root.addView(letters, FrameLayout.LayoutParams(dp(40), -1, android.view.Gravity.CENTER).apply {
@@ -383,15 +388,19 @@ class MainActivity : Activity() {
         row.layoutParams = LinearLayout.LayoutParams(-1, rowHeight.coerceAtLeast(dp(36)))
 
         var gestureConsumed = false
+        var touchStartX = 0f
+        var touchStartY = 0f
+        val longPress = Runnable {
+            if (!gestureConsumed) {
+                gestureConsumed = true
+                onItemLongPress(item)
+            }
+        }
         val detector = GestureDetector(this, object : GestureDetector.SimpleOnGestureListener() {
             override fun onDown(e: MotionEvent) = true
             override fun onSingleTapUp(e: MotionEvent): Boolean {
                 if (!gestureConsumed) onItemClick(item)
                 return true
-            }
-            override fun onLongPress(e: MotionEvent) {
-                gestureConsumed = true
-                onItemLongPress(item)
             }
             override fun onScroll(e1: MotionEvent?, e2: MotionEvent, distanceX: Float, distanceY: Float): Boolean {
                 if (e1 != null && kotlin.math.abs(e2.x - e1.x) > ViewConfiguration.get(this@MainActivity).scaledTouchSlop &&
@@ -405,11 +414,24 @@ class MainActivity : Activity() {
                 }
                 return false
             }
-        })
+        }).apply { setIsLongpressEnabled(false) }
         row.setOnTouchListener { _, event ->
-            if (event.actionMasked == MotionEvent.ACTION_DOWN) gestureConsumed = false
+            when (event.actionMasked) {
+                MotionEvent.ACTION_DOWN -> {
+                    gestureConsumed = false
+                    touchStartX = event.x
+                    touchStartY = event.y
+                    handler.postDelayed(longPress, 300L)
+                }
+                MotionEvent.ACTION_MOVE -> {
+                    val slop = ViewConfiguration.get(this@MainActivity).scaledTouchSlop
+                    if (kotlin.math.abs(event.x - touchStartX) > slop ||
+                        kotlin.math.abs(event.y - touchStartY) > slop) handler.removeCallbacks(longPress)
+                }
+            }
             val handled = detector.onTouchEvent(event)
             if (event.actionMasked == MotionEvent.ACTION_UP || event.actionMasked == MotionEvent.ACTION_CANCEL) {
+                handler.removeCallbacks(longPress)
                 row.parent?.requestDisallowInterceptTouchEvent(false)
                 gestureConsumed = false
             }
@@ -457,6 +479,7 @@ class MainActivity : Activity() {
         refreshing = true
         refreshButton.alpha = 0.5f
         filter = null
+        if (::lettersBar.isInitialized) lettersBar.childrenTextColor(null)
         leftColumn.visibility = View.INVISIBLE
         worker.execute {
             val cached = loadCachedItems()
