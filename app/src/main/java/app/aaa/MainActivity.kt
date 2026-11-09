@@ -1,5 +1,6 @@
 package app.aaa
 
+import android.app.Activity
 import android.app.usage.UsageStatsManager
 import android.content.Context
 import android.content.Intent
@@ -7,45 +8,37 @@ import android.content.pm.PackageManager
 import android.app.AppOpsManager
 import android.provider.Settings
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
+import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.graphics.Canvas
+import android.graphics.Color
+import android.graphics.Typeface
+import android.graphics.drawable.Drawable
+import android.view.GestureDetector
+import android.view.MotionEvent
+import android.view.View
+import android.view.ViewConfiguration
+import android.view.ViewGroup
+import android.widget.FrameLayout
+import android.widget.ImageView
+import android.widget.LinearLayout
+import android.widget.ScrollView
+import android.widget.TextView
+import android.widget.Toast
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
-import androidx.activity.ComponentActivity
-import androidx.activity.compose.setContent
-import androidx.activity.enableEdgeToEdge
-import androidx.compose.foundation.Image
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.background
-import androidx.compose.foundation.gestures.detectTapGestures
-import androidx.compose.foundation.gestures.detectHorizontalDragGestures
-import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.runtime.*
-import androidx.compose.ui.Alignment
-import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.alpha
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.ImageBitmap
-import androidx.compose.ui.graphics.asImageBitmap
-import androidx.compose.ui.graphics.asAndroidBitmap
-import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.platform.LocalViewConfiguration
-import androidx.compose.ui.platform.ViewConfiguration
-import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
-import androidx.core.graphics.drawable.toBitmap
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.sync.withLock
-import kotlinx.coroutines.withContext
+import java.util.concurrent.Executors
 import rikka.shizuku.Shizuku
 
+private const val BLACK = Color.BLACK
+private const val WHITE = Color.WHITE
+private const val GREY = 0xFF888888.toInt()
+
 data class Item(
-    val pkg: String, val user: Int, val label: String, val icon: ImageBitmap,
+    val pkg: String, val user: Int, val label: String, val icon: Bitmap,
     val initial: Char, val used: Long, val disabled: Boolean,
 ) { val key get() = appIdentityKey(pkg, user) }
 
@@ -59,18 +52,44 @@ object Sh {
         val p = m.invoke(null, arrayOf("sh", "-c", cmd), null, null) as Process
         val out = p.inputStream.bufferedReader().readText()
         p.waitFor(); out
-    } catch (e: Throwable) { "" }
+    } catch (_: Throwable) { "" }
 }
 
-class MainActivity : ComponentActivity() {
+class MainActivity : Activity() {
+    private val worker = Executors.newSingleThreadExecutor()
+    private val handler = Handler(Looper.getMainLooper())
     private val tr by lazy { android.icu.text.Transliterator.getInstance("Han-Latin; Latin-ASCII") }
     private val prefs by lazy { getSharedPreferences("p", Context.MODE_PRIVATE) }
+    private val items = ArrayList<Item>()
+    private val launched = LinkedHashMap<String, Long>()
+    private val white = LinkedHashSet<String>()
+    private var filter: Char? = null
+    private var refreshing = false
+    private lateinit var root: FrameLayout
+    private lateinit var leftScroll: ScrollView
+    private lateinit var rightScroll: ScrollView
+    private lateinit var leftRows: LinearLayout
+    private lateinit var rightRows: LinearLayout
+    private lateinit var leftColumn: LinearLayout
+    private lateinit var rightColumn: LinearLayout
+    private lateinit var refreshButton: TextView
+    private lateinit var bulkDisableButton: TextView
+    private var rowHeight = 48
+
+    private fun dp(v: Int): Int = (v * resources.displayMetrics.density + 0.5f).toInt()
+    private fun text(value: String, size: Float, color: Int = WHITE): TextView =
+        TextView(this).apply {
+            this.text = value
+            textSize = size
+            setTextColor(color)
+            gravity = android.view.Gravity.CENTER
+            includeFontPadding = false
+        }
+
     private fun hasUsageAccess(): Boolean {
         val appOps = getSystemService(Context.APP_OPS_SERVICE) as AppOpsManager
         return appOps.checkOpNoThrow(
-            AppOpsManager.OPSTR_GET_USAGE_STATS,
-            android.os.Process.myUid(),
-            packageName,
+            AppOpsManager.OPSTR_GET_USAGE_STATS, android.os.Process.myUid(), packageName
         ) == AppOpsManager.MODE_ALLOWED
     }
 
@@ -79,7 +98,6 @@ class MainActivity : ComponentActivity() {
         Sh.run("cmd appops set $packageName GET_USAGE_STATS allow")
         return hasUsageAccess()
     }
-
 
     private fun initialOf(s: String): Char {
         val first = s.trim().firstOrNull() ?: return '#'
@@ -95,6 +113,14 @@ class MainActivity : ComponentActivity() {
     private fun iconFile(pkg: String, user: Int) =
         File(File(cacheDir, "app-icons").apply { mkdirs() }, "${user}-${pkg}.png")
 
+    private fun drawableBitmap(drawable: Drawable): Bitmap {
+        val bitmap = Bitmap.createBitmap(96, 96, Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(bitmap)
+        drawable.setBounds(0, 0, 96, 96)
+        drawable.draw(canvas)
+        return bitmap
+    }
+
     private fun loadCachedItems(): List<Item> {
         val raw = prefs.getString("items_cache", null) ?: return emptyList()
         return try {
@@ -105,7 +131,7 @@ class MainActivity : ComponentActivity() {
                     val pkg = o.getString("pkg")
                     val user = o.getInt("user")
                     val bitmap = BitmapFactory.decodeFile(iconFile(pkg, user).absolutePath) ?: continue
-                    add(Item(pkg, user, o.getString("label"), bitmap.asImageBitmap(),
+                    add(Item(pkg, user, o.getString("label"), bitmap,
                         o.getString("initial").firstOrNull() ?: '#', o.optLong("used", 0L),
                         o.optBoolean("disabled", false)))
                 }
@@ -113,13 +139,13 @@ class MainActivity : ComponentActivity() {
         } catch (_: Throwable) { emptyList() }
     }
 
-    private fun saveCachedItems(items: List<Item>) {
+    private fun saveCachedItems(source: List<Item>) {
         try {
             val array = JSONArray()
-            for (item in items) {
+            for (item in source) {
                 val file = iconFile(item.pkg, item.user)
                 if (!file.exists()) file.outputStream().use {
-                    item.icon.asAndroidBitmap().compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it)
+                    item.icon.compress(Bitmap.CompressFormat.PNG, 100, it)
                 }
                 array.put(JSONObject().apply {
                     put("pkg", item.pkg); put("user", item.user); put("label", item.label)
@@ -136,351 +162,366 @@ class MainActivity : ComponentActivity() {
 
     private fun loadItems(cachedItems: List<Item> = loadCachedItems()): List<Item> {
         val cached = cachedItems.associateBy { it.key }
-        val users = Regex("UserInfo\\{(\\d+):").findAll(Sh.run("pm list users")).map { it.groupValues[1].toInt() }.toList()
-            .ifEmpty { listOf(0) }
+        val users = Regex("UserInfo\\{(\\d+):").findAll(Sh.run("pm list users"))
+            .map { it.groupValues[1].toInt() }.toList().ifEmpty { listOf(0) }
         val usage = if (hasUsageAccess()) {
             (getSystemService(Context.USAGE_STATS_SERVICE) as UsageStatsManager)
-                .queryAndAggregateUsageStats(
-                    System.currentTimeMillis() - 30L * 86400000,
-                    System.currentTimeMillis(),
-                ).mapValues { it.value.totalTimeInForeground }
+                .queryAndAggregateUsageStats(System.currentTimeMillis() - 30L * 86400000, System.currentTimeMillis())
+                .mapValues { it.value.totalTimeInForeground }
         } else emptyMap()
         val out = ArrayList<Item>()
         for (u in users) {
-            val all = Sh.run("pm list packages -3 --user $u").lines().mapNotNull { it.removePrefix("package:").trim().ifEmpty { null } }
-            val dis = Sh.run("pm list packages -3 -d --user $u").lines().map { it.removePrefix("package:").trim() }.toSet()
+            val all = Sh.run("pm list packages -3 --user $u").lines()
+                .mapNotNull { it.removePrefix("package:").trim().ifEmpty { null } }
+            val dis = Sh.run("pm list packages -3 -d --user $u").lines()
+                .map { it.removePrefix("package:").trim() }.toSet()
             for (p in all) {
                 if (p == packageName) continue
                 try {
                     val old = cached["$p:$u"]
-                    if (old != null) {
-                        out += old.copy(used = usage[p] ?: 0L, disabled = p in dis)
-                    } else {
+                    if (old != null) out += old.copy(used = usage[p] ?: 0L, disabled = p in dis)
+                    else {
                         val info = packageManager.getApplicationInfo(p, 0)
                         val label = packageManager.getApplicationLabel(info).toString()
-                        val icon = packageManager.getApplicationIcon(info).toBitmap(96, 96).asImageBitmap()
+                        val icon = drawableBitmap(packageManager.getApplicationIcon(info))
                         out += Item(p, u, label, icon, initialOf(label), usage[p] ?: 0L, p in dis)
                     }
                 } catch (_: Throwable) {}
             }
         }
-        // Keep the saved default sequence from cache. Fresh package enumeration
-        // may return a different order, so cached entries retain their positions.
         val cachedOrder = cachedItems.mapIndexed { index, item -> item.key to index }.toMap()
-        return out.sortedWith(
-            compareBy<Item> { cachedOrder[it.key] ?: Int.MAX_VALUE }
-                .thenByDescending { it.used }
-        )
+        return out.sortedWith(compareBy<Item> { cachedOrder[it.key] ?: Int.MAX_VALUE }.thenByDescending { it.used })
     }
 
-    private fun launch(it: Item): Boolean {
-        // Re-enable only for the selected Android user.
-        if (it.disabled) {
-            Sh.run("pm enable --user ${it.user} ${it.pkg}")
+    private fun launch(item: Item): Boolean {
+        if (item.disabled) {
+            Sh.run("pm enable --user ${item.user} ${item.pkg}")
             Thread.sleep(350)
-            if (isPackageDisabled(it)) return false
+            if (isPackageDisabled(item)) return false
         }
-
-        val user = it.user
-        val pkg = it.pkg
-
-        // Resolve the real launcher component first. This handles apps whose launch
-        // activity is an alias or cannot be resolved by a package-only MAIN intent.
+        val user = item.user
+        val pkg = item.pkg
         val resolved = Sh.run(
             "cmd package resolve-activity --brief --user $user " +
-                "-a android.intent.action.MAIN " +
-                "-c android.intent.category.LAUNCHER " +
-                "-p $pkg"
+                "-a android.intent.action.MAIN -c android.intent.category.LAUNCHER -p $pkg"
         )
-        val component = resolved.lineSequence()
-            .map { line -> line.trim() }
-            .firstOrNull { line -> line.startsWith("$pkg/") && !line.contains(" ") }
-
+        val component = resolved.lineSequence().map { it.trim() }
+            .firstOrNull { it.startsWith("$pkg/") && !it.contains(" ") }
         if (component != null) {
             val result = Sh.run("am start --user $user -n $component")
-            if (!result.contains("Error:", ignoreCase = true) &&
-                !result.contains("Exception", ignoreCase = true)) return true
+            if (!result.contains("Error:", true) && !result.contains("Exception", true)) return true
         }
-
-        // Some apps expose CATEGORY_MONKEY rather than a normal launcher entry.
-        // ActivityManager supports --user; the Monkey executable itself does not.
         val monkeyCategory = Sh.run(
-            "am start --user $user " +
-                "-a android.intent.action.MAIN " +
-                "-c android.intent.category.MONKEY " +
-                "-p $pkg"
+            "am start --user $user -a android.intent.action.MAIN -c android.intent.category.MONKEY -p $pkg"
         )
-        if (!monkeyCategory.contains("Error:", ignoreCase = true) &&
-            !monkeyCategory.contains("No activity found", ignoreCase = true) &&
-            !monkeyCategory.contains("Exception", ignoreCase = true)) return true
-
-        // Last fallback: retry standard launcher intent through ActivityManager.
+        if (!monkeyCategory.contains("Error:", true) &&
+            !monkeyCategory.contains("No activity found", true) &&
+            !monkeyCategory.contains("Exception", true)) return true
         val launcher = Sh.run(
-            "am start --user $user " +
-                "-a android.intent.action.MAIN " +
-                "-c android.intent.category.LAUNCHER " +
-                "-p $pkg"
+            "am start --user $user -a android.intent.action.MAIN -c android.intent.category.LAUNCHER -p $pkg"
         )
-        return !launcher.contains("Error:", ignoreCase = true) &&
-            !launcher.contains("No activity found", ignoreCase = true) &&
-            !launcher.contains("Exception", ignoreCase = true)
+        return !launcher.contains("Error:", true) &&
+            !launcher.contains("No activity found", true) && !launcher.contains("Exception", true)
     }
 
-    private fun disableApp(it: Item) {
-        Sh.run("am force-stop --user ${it.user} ${it.pkg}; pm disable-user --user ${it.user} ${it.pkg}")
+    private fun disableApp(item: Item) {
+        Sh.run("am force-stop --user ${item.user} ${item.pkg}; pm disable-user --user ${item.user} ${item.pkg}")
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        enableEdgeToEdge()
-
-        setContent {
-            val scope = rememberCoroutineScope()
-            var items by remember { mutableStateOf<List<Item>>(emptyList()) }
-            val launched = remember { mutableStateMapOf<String, Long>() }
-            var white by remember {
-                mutableStateOf(
-                    prefs.getStringSet("white", emptySet())!!.map { key ->
-                        if (':' in key) key else "$key:0"
-                    }.toSet()
-                )
+        window.statusBarColor = BLACK
+        window.navigationBarColor = BLACK
+        window.decorView.systemUiVisibility = 0
+        white.addAll(prefs.getStringSet("white", emptySet())!!.map { key ->
+            if (':' in key) key else "$key:0"
+        })
+        buildScreen()
+        root.post {
+            rowHeight = ((root.height - dp(48) - dp(56)) - dp(56)).coerceAtLeast(dp(15)) / 15
+            renderLists()
+        }
+        // Startup is cache-only: no permission checks, prompts, or package scan.
+        worker.execute {
+            val cached = loadCachedItems()
+            runOnUiThread {
+                if (items.isEmpty() && cached.isNotEmpty()) {
+                    items.clear(); items.addAll(cached); renderLists()
+                }
             }
-            LaunchedEffect(Unit) {
-                prefs.edit().putStringSet("white", white).apply()
-            }
-            var filter by remember { mutableStateOf<Char?>(null) }
-            var leftListGeneration by remember { mutableIntStateOf(0) }
-            var leftVisible by remember { mutableStateOf(true) }
-            var refreshInProgress by remember { mutableStateOf(false) }
-            val refreshMutex = remember { kotlinx.coroutines.sync.Mutex() }
+        }
+    }
 
-            suspend fun refreshAll() {
-                refreshMutex.withLock {
-                    // Permission checks and permission prompts happen only after
-                    // the user presses Refresh, never during startup or onResume.
-                    if (!Shizuku.pingBinder()) {
+    private fun buildScreen() {
+        root = FrameLayout(this).apply { setBackgroundColor(BLACK) }
+        val content = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setBackgroundColor(BLACK)
+        }
+        content.addView(View(this), LinearLayout.LayoutParams(-1, dp(48)))
+        val columns = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        leftColumn = makeAppColumn(true)
+        rightColumn = makeAppColumn(false)
+        columns.addView(leftColumn, LinearLayout.LayoutParams(0, -1, 1f))
+        columns.addView(rightColumn, LinearLayout.LayoutParams(0, -1, 1f))
+        content.addView(columns, LinearLayout.LayoutParams(-1, 0, 1f))
+        root.addView(content, FrameLayout.LayoutParams(-1, -1))
+
+        val letters = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = android.view.Gravity.CENTER
+        }
+        ("ABCDEFGHIJKLMNOPQRSTUVWXYZ").forEach { ch ->
+            val letter = text(ch.toString(), 11f, GREY)
+            letters.addView(letter, LinearLayout.LayoutParams(-1, 0, 1f))
+            letter.setOnClickListener {
+                filter = ch
+                renderLeft()
+                letters.childrenTextColor(filter)
+            }
+        }
+        root.addView(letters, FrameLayout.LayoutParams(dp(40), -1, android.view.Gravity.CENTER).apply {
+            topMargin = dp(48); bottomMargin = dp(8)
+        })
+
+        refreshButton = text("刷新", 16f).apply {
+            setOnClickListener { refresh() }
+        }
+        bulkDisableButton = text("停用", 16f).apply {
+            setOnClickListener { bulkDisable() }
+        }
+        root.addView(refreshButton, FrameLayout.LayoutParams(0, dp(56), android.view.Gravity.BOTTOM or android.view.Gravity.START).apply {
+            width = resources.displayMetrics.widthPixels / 2 - dp(20)
+            marginEnd = dp(20)
+        })
+        root.addView(bulkDisableButton, FrameLayout.LayoutParams(0, dp(56), android.view.Gravity.BOTTOM or android.view.Gravity.END).apply {
+            width = resources.displayMetrics.widthPixels / 2 - dp(20)
+            marginStart = dp(20)
+        })
+        setContentView(root)
+    }
+
+    private fun LinearLayout.childrenTextColor(selected: Char?) {
+        for (i in 0 until childCount) {
+            val child = getChildAt(i) as? TextView ?: continue
+            child.setTextColor(if (child.text.firstOrNull() == selected) WHITE else GREY)
+        }
+    }
+
+    private fun makeAppColumn(left: Boolean): LinearLayout {
+        val scroll = ScrollView(this).apply {
+            isFillViewport = false
+            overScrollMode = View.OVER_SCROLL_NEVER
+            setBackgroundColor(BLACK)
+        }
+        val rows = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        scroll.addView(rows, ScrollView.LayoutParams(-1, -2))
+        if (left) {
+            leftScroll = scroll; leftRows = rows
+        } else {
+            rightScroll = scroll; rightRows = rows
+        }
+        val column = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        column.addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f))
+        column.setPadding(if (left) 0 else dp(20), 0, if (left) dp(20) else 0, 0)
+        return column
+    }
+
+    private fun renderLists() {
+        renderLeft()
+        renderRight()
+    }
+
+    private fun renderLeft() {
+        if (!::leftRows.isInitialized) return
+        val y = leftScroll.scrollY
+        leftRows.removeAllViews()
+        items.asSequence().distinctBy { it.key }
+            .filter { filter == null || it.initial == filter }
+            .forEach { item -> leftRows.addView(makeItemRow(item)) }
+        leftRows.addView(View(this), LinearLayout.LayoutParams(1, dp(56)))
+        leftScroll.post { leftScroll.scrollTo(0, y) }
+    }
+
+    private fun renderRight() {
+        if (!::rightRows.isInitialized) return
+        val y = rightScroll.scrollY
+        rightRows.removeAllViews()
+        items.filter { it.key in launched && !it.disabled }
+            .forEach { item -> rightRows.addView(makeItemRow(item)) }
+        rightRows.addView(View(this), LinearLayout.LayoutParams(1, dp(56)))
+        rightScroll.post { rightScroll.scrollTo(0, y) }
+    }
+
+    private fun makeItemRow(item: Item): View {
+        val row = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = android.view.Gravity.CENTER
+            alpha = if (item.disabled) 0.3f else 1f
+            setPadding(dp(1), 0, dp(1), 0)
+        }
+        row.addView(text(if (item.key in white) "☆" else "", 14f), LinearLayout.LayoutParams(dp(16), -2))
+        val iconFrame = FrameLayout(this)
+        val icon = ImageView(this).apply {
+            setImageBitmap(item.icon)
+            scaleType = ImageView.ScaleType.FIT_CENTER
+        }
+        iconFrame.addView(icon, FrameLayout.LayoutParams(dp(42), dp(42)))
+        if (item.user != 0) {
+            val badge = text(item.user.toString(), 8f, BLACK).apply { setBackgroundColor(0xFF00FF00.toInt()) }
+            iconFrame.addView(badge, FrameLayout.LayoutParams(-2, -2, android.view.Gravity.BOTTOM or android.view.Gravity.END))
+        }
+        row.addView(iconFrame, LinearLayout.LayoutParams(dp(42), dp(42)))
+        row.addView(View(this), LinearLayout.LayoutParams(dp(8), 1))
+        val label = text(item.label, 14f).apply {
+            gravity = android.view.Gravity.CENTER_VERTICAL
+            maxLines = 1
+            ellipsize = android.text.TextUtils.TruncateAt.END
+        }
+        row.addView(label, LinearLayout.LayoutParams(0, -2, 1f))
+        row.layoutParams = LinearLayout.LayoutParams(-1, rowHeight.coerceAtLeast(dp(36)))
+
+        val detector = GestureDetector(this, object : GestureDetector.SimpleOnGestureListener() {
+            private var swiped = false
+            override fun onDown(e: MotionEvent) = true
+            override fun onSingleTapUp(e: MotionEvent): Boolean {
+                if (!swiped) onItemClick(item)
+                swiped = false
+                return true
+            }
+            override fun onLongPress(e: MotionEvent) {
+                swiped = true
+                onItemLongPress(item)
+            }
+            override fun onScroll(e1: MotionEvent?, e2: MotionEvent, distanceX: Float, distanceY: Float): Boolean {
+                if (e1 != null && kotlin.math.abs(e2.x - e1.x) > ViewConfiguration.get(this@MainActivity).scaledTouchSlop &&
+                    kotlin.math.abs(e2.x - e1.x) > kotlin.math.abs(e2.y - e1.y)) {
+                    if (!swiped) {
+                        swiped = true
+                        row.parent?.requestDisallowInterceptTouchEvent(true)
+                        toggleWhite(item)
+                    }
+                    return true
+                }
+                return false
+            }
+        })
+        row.setOnTouchListener { _, event ->
+            if (event.actionMasked == MotionEvent.ACTION_UP || event.actionMasked == MotionEvent.ACTION_CANCEL) {
+                row.parent?.requestDisallowInterceptTouchEvent(false)
+            }
+            detector.onTouchEvent(event)
+        }
+        return row
+    }
+
+    private fun toggleWhite(item: Item) {
+        if (!white.add(item.key)) white.remove(item.key)
+        prefs.edit().putStringSet("white", white).apply()
+        renderLists()
+    }
+
+    private fun onItemClick(item: Item) {
+        worker.execute {
+            val success = launch(item)
+            val disabled = isPackageDisabled(item)
+            runOnUiThread {
+                val index = items.indexOfFirst { it.key == item.key }
+                if (index >= 0) items[index] = items[index].copy(disabled = disabled)
+                if (success) launched[item.key] = System.currentTimeMillis()
+                else Toast.makeText(this, "启动失败：${item.label}", Toast.LENGTH_SHORT).show()
+                renderLists()
+            }
+        }
+    }
+
+    private fun onItemLongPress(item: Item) {
+        worker.execute {
+            disableApp(item)
+            val disabled = isPackageDisabled(item)
+            runOnUiThread {
+                val index = items.indexOfFirst { it.key == item.key }
+                if (index >= 0) items[index] = items[index].copy(disabled = disabled)
+                launched.remove(item.key)
+                renderLists()
+            }
+        }
+    }
+
+    private fun refresh() {
+        if (refreshing) return
+        refreshing = true
+        refreshButton.alpha = 0.5f
+        filter = null
+        leftColumn.visibility = View.INVISIBLE
+        worker.execute {
+            val cached = loadCachedItems()
+            runOnUiThread {
+                items.clear(); items.addAll(cached)
+                renderLists()
+                leftColumn.visibility = View.VISIBLE
+                refreshAll()
+            }
+        }
+    }
+
+    private fun refreshAll() {
+        if (!Shizuku.pingBinder()) {
+            Toast.makeText(this, "Shizuku 未运行，请先启动 Shizuku 后再刷新", Toast.LENGTH_SHORT).show()
+            finishRefresh()
+            return
+        }
+        if (!granted()) {
+            Shizuku.requestPermission(0)
+            finishRefresh()
+            return
+        }
+        worker.execute {
+            val usageGranted = tryGrantUsageAccess()
+            runOnUiThread {
+                if (!usageGranted) {
+                    startActivity(Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS))
+                    finishRefresh()
+                } else {
+                    worker.execute {
+                        val fresh = loadItems(items.toList())
+                        saveCachedItems(fresh)
                         runOnUiThread {
-                            android.widget.Toast.makeText(
-                                this@MainActivity, "Shizuku 未运行，请先启动 Shizuku 后再刷新",
-                                android.widget.Toast.LENGTH_SHORT
-                            ).show()
-                        }
-                        return@withLock
-                    }
-                    if (!granted()) {
-                        Shizuku.requestPermission(0)
-                        return@withLock
-                    }
-                    if (!withContext(Dispatchers.IO) { tryGrantUsageAccess() }) {
-                        startActivity(Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS))
-                        return@withLock
-                    }
-
-                    // The cached list is already visible. Scan and update it in the
-                    // background without resetting the user's current scroll position.
-                    val currentItems = items
-                    val fresh = withContext(Dispatchers.IO) { loadItems(currentItems) }
-                    items = fresh
-                    withContext(Dispatchers.IO) { saveCachedItems(fresh) }
-                }
-            }
-
-            LaunchedEffect(Unit) {
-                // Startup is cache-only. Permission checks and fresh queries are
-                // performed exclusively by the Refresh control.
-                val cached = withContext(Dispatchers.IO) { loadCachedItems() }
-                if (cached.isNotEmpty()) items = cached
-            }
-
-            fun toggleWhite(item: Item) {
-                val key = item.key
-                white = if (key in white) white - key else white + key
-                prefs.edit().putStringSet("white", white).apply()
-            }
-            fun act(item: Item, block: () -> Unit) = scope.launch(Dispatchers.IO) {
-                block()
-                val disabled = isPackageDisabled(item)
-                withContext(Dispatchers.Main) {
-                    items = items.map { if (it.key == item.key) it.copy(disabled = disabled) else it }
-                }
-            }
-
-            // Treat each installed app profile as a separate entry.
-            // Package name alone is not unique when the same app exists in multiple Android users.
-            val left = items.distinctBy { it.key }
-                .filter { filter == null || it.initial == filter }
-            val right = items.filter { it.key in launched && !it.disabled }
-
-            Box(Modifier.fillMaxSize().background(Color.Black)) {
-                Column(Modifier.fillMaxSize()) {
-                    Spacer(Modifier.height(48.dp))
-                    Row(Modifier.weight(1f).fillMaxWidth()) {
-                        if (leftVisible) key(leftListGeneration) {
-                            AppList(left, white, rememberLazyListState(), Modifier.weight(1f).padding(end = 20.dp), 56.dp,
-                                { i -> act(i) {
-                                    if (launch(i)) {
-                                        launched[i.key] = System.currentTimeMillis()
-                                    } else {
-                                        runOnUiThread {
-                                            android.widget.Toast.makeText(
-                                                this@MainActivity, "启动失败：${i.label}",
-                                                android.widget.Toast.LENGTH_SHORT
-                                            ).show()
-                                        }
-                                    }
-                                } },
-                                { i -> act(i) { disableApp(i); launched.remove(i.key) } },
-                                { i -> toggleWhite(i) })
-                        } else {
-                            Spacer(Modifier.weight(1f).fillMaxHeight().padding(end = 20.dp))
-                        }
-                        AppList(right, white, rememberLazyListState(), Modifier.weight(1f).padding(start = 20.dp), 56.dp,
-                            { i -> act(i) {
-                                if (!launch(i)) runOnUiThread {
-                                    android.widget.Toast.makeText(
-                                        this@MainActivity, "启动失败：${i.label}",
-                                        android.widget.Toast.LENGTH_SHORT
-                                    ).show()
-                                }
-                            } },
-                            { i -> act(i) { disableApp(i); launched.remove(i.key) } },
-                            { i -> toggleWhite(i) })
-                    }
-                }
-                Column(
-                    Modifier.align(Alignment.Center).fillMaxHeight().width(40.dp).padding(top = 48.dp, bottom = 8.dp),
-                    verticalArrangement = Arrangement.SpaceEvenly,
-                ) {
-                    ("ABCDEFGHIJKLMNOPQRSTUVWXYZ").forEach { c ->
-                        Box(
-                            Modifier.weight(1f).fillMaxWidth()
-                                .clickable { filter = c },
-                            contentAlignment = Alignment.Center,
-                        ) {
-                            T(c.toString(), c = if (filter == c) Color.White else Color(0xFF888888), s = 11)
+                            items.clear(); items.addAll(fresh)
+                            renderLists()
+                            finishRefresh()
                         }
                     }
                 }
-                Box(
-                    Modifier.align(Alignment.BottomStart).fillMaxWidth(0.5f).padding(end = 20.dp).height(56.dp)
-                        .clickable {
-                            if (refreshInProgress) return@clickable
-                            refreshInProgress = true
-                            leftVisible = false
-                            filter = null
-                            scope.launch {
-                                try {
-                                    // Reload the saved default order first. Show it before
-                                    // starting any Shizuku/system package scan.
-                                    val cached = withContext(Dispatchers.IO) { loadCachedItems() }
-                                    items = cached
-                                    leftListGeneration++
-                                    leftVisible = true
-                                    // Give Compose a frame to draw the restored list
-                                    // before the slower permission checks and scan begin.
-                                    withFrameNanos { }
-                                    refreshAll()
-                                } finally {
-                                    leftVisible = true
-                                    refreshInProgress = false
-                                }
-                            }
-                        },
-                    contentAlignment = Alignment.Center,
-                ) { T("刷新", c = Color.White, s = 16) }
-                Box(
-                    Modifier.align(Alignment.BottomEnd).fillMaxWidth(0.5f).padding(start = 20.dp).height(56.dp)
-                        .pointerInput(right, white) {
-                            detectTapGestures(onTap = {
-                                val targets = right.filter { it.key !in white }
-                                if (targets.isNotEmpty()) scope.launch(Dispatchers.IO) {
-                                    targets.forEach { disableApp(it) }
-                                    val states = targets.associate { it.key to isPackageDisabled(it) }
-                                    withContext(Dispatchers.Main) {
-                                        items = items.map { item ->
-                                            states[item.key]?.let { item.copy(disabled = it) } ?: item
-                                        }
-                                        targets.forEach { launched.remove(it.key) }
-                                    }
-                                }
-                            })
-                        },
-                    contentAlignment = Alignment.Center,
-                 ) { T("停用", c = Color.White, s = 16) }
             }
         }
+    }
+
+    private fun finishRefresh() {
+        refreshing = false
+        refreshButton.alpha = 1f
+    }
+
+    private fun bulkDisable() {
+        val targets = items.filter { it.key in launched && it.key !in white && !it.disabled }
+        if (targets.isEmpty()) return
+        worker.execute {
+            targets.forEach { disableApp(it) }
+            val states = targets.associate { it.key to isPackageDisabled(it) }
+            runOnUiThread {
+                items.indices.forEach { i ->
+                    val state = states[items[i].key]
+                    if (state != null) items[i] = items[i].copy(disabled = state)
+                }
+                targets.forEach { launched.remove(it.key) }
+                renderRight()
+                renderLeft()
+            }
+        }
+    }
+
+    override fun onDestroy() {
+        worker.shutdown()
+        super.onDestroy()
     }
 }
-
-@Composable
-fun AppList(
-    list: List<Item>, white: Set<String>,
-    state: androidx.compose.foundation.lazy.LazyListState,
-    modifier: Modifier, bottomPad: androidx.compose.ui.unit.Dp,
-    onClick: (Item) -> Unit, onLong: (Item) -> Unit, onSwipe: (Item) -> Unit,
-) {
-    val baseViewConfiguration = LocalViewConfiguration.current
-    val quickLongPressConfiguration = remember(baseViewConfiguration) {
-        object : ViewConfiguration by baseViewConfiguration {
-            override val longPressTimeoutMillis: Long = 300L
-        }
-    }
-    CompositionLocalProvider(LocalViewConfiguration provides quickLongPressConfiguration) {
-    BoxWithConstraints(modifier) {
-    val itemHeight = ((maxHeight - bottomPad).coerceAtLeast(0.dp)) / 15
-    LazyColumn(Modifier.fillMaxSize(), state, contentPadding = PaddingValues(bottom = bottomPad)) {
-        items(list, key = { it.key }) { it ->
-            val cur by rememberUpdatedState(it)
-            val disabledNow = it.disabled
-            Row(
-                Modifier.fillMaxWidth().height(itemHeight).alpha(if (disabledNow) 0.3f else 1f)
-                    .pointerInput(cur.key) {
-                        detectTapGestures(
-                            onTap = { onClick(cur) },
-                            onLongPress = { onLong(cur) },
-                        )
-                    }
-                    .pointerInput(cur.key) {
-                        var horizontalDistance = 0f
-                        detectHorizontalDragGestures(
-                            onDragStart = { horizontalDistance = 0f },
-                            onHorizontalDrag = { change, dragAmount ->
-                                horizontalDistance += dragAmount
-                                change.consume()
-                            },
-                            onDragEnd = {
-                                if (kotlin.math.abs(horizontalDistance) >= viewConfiguration.touchSlop) {
-                                    onSwipe(cur)
-                                }
-                            },
-                            onDragCancel = { horizontalDistance = 0f },
-                        )
-                    },
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.Center,
-            ) {
-                T(if (it.key in white) "☆" else "", c = Color.White, s = 14, modifier = Modifier.width(16.dp))
-                Box {
-                    Image(it.icon, null, Modifier.size(42.dp))
-                    if (it.user != 0) T(
-                        it.user.toString(), c = Color.Black, s = 8,
-                        modifier = Modifier.align(Alignment.BottomEnd).background(Color(0xFF00FF00)).padding(horizontal = 2.dp),
-                    )
-                }
-                Spacer(Modifier.width(8.dp))
-                T(it.label, c = Color.White, s = 14, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            }
-        }
-    }
-    }
-    }
-}
-
-@Composable
-fun T(
-    t: String, c: Color, s: Int, modifier: Modifier = Modifier,
-    maxLines: Int = Int.MAX_VALUE, overflow: TextOverflow = TextOverflow.Clip,
-) = androidx.compose.foundation.text.BasicText(
-    t, modifier, style = androidx.compose.ui.text.TextStyle(color = c, fontSize = s.sp),
-    maxLines = maxLines, overflow = overflow,
-)
