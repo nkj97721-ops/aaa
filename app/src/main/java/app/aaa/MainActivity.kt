@@ -315,7 +315,7 @@ class MainActivity : Activity() {
             setBackgroundColor(BLACK)
         }
         val rows = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        scroll.addView(rows, ScrollView.LayoutParams(-1, -2))
+        scroll.addView(rows, FrameLayout.LayoutParams(-1, -2))
         if (left) {
             leftScroll = scroll; leftRows = rows
         } else {
