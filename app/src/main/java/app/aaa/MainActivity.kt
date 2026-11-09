@@ -504,7 +504,8 @@ class MainActivity : Activity() {
                     finishRefresh()
                 } else {
                     worker.execute {
-                        val fresh = loadItems(items.toList())
+                        val cachedBaseline = loadCachedItems().ifEmpty { items.toList() }
+                        val fresh = loadItems(cachedBaseline)
                         saveCachedItems(fresh)
                         runOnUiThread {
                             items.clear(); items.addAll(fresh)
