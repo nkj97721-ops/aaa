@@ -20,11 +20,17 @@ A normal branch build does **not** publish or overwrite a GitHub Release. Only a
 
 There is currently a small unit-test suite for Android-user-specific app identity keys. Add regression tests for every new pure logic function and run the full workflow before promoting a change.
 
+## Protecting the stable branch
+
+The repository currently has no server-enforced branch protection rules. In GitHub, open **Settings → Branches → Add branch protection rule**, target `stable`, then enable **Require a pull request before merging**, **Require status checks to pass before merging** (select the `apk` job after its first successful run), and **Block force pushes**. The connector used for this maintenance work can inspect branch protection but cannot create the rule, so this one setting must be completed in GitHub's web interface.
+
+The workflow also cancels older in-progress builds on the same ref when a newer commit arrives, avoiding a queue of obsolete APK builds.
+
 ## Permanent Android signing key — critical
 
 The previous workflow used the GitHub runner's generated debug signing key. GitHub-hosted runners are temporary, so that key is not a reliable long-term app identity. A new permanent upload key must be configured before publishing the next stable APK.
 
-1. Generate a private keystore on a trusted computer and keep at least two encrypted backups in separate safe locations. Never commit the keystore, passwords, or Base64 text to this repository.
+1. Generate a private keystore on a trusted computer (example: `keytool -genkeypair -v -keystore abb-upload.jks -storetype JKS -alias abb-upload -keyalg RSA -keysize 2048 -validity 10000`). Keep at least two encrypted backups in separate safe locations. Never commit the keystore, passwords, or Base64 text to this repository. On Linux, produce the secret value with `base64 -w 0 abb-upload.jks`; on macOS use `base64 < abb-upload.jks | tr -d '\\n'`; on Windows PowerShell use `[Convert]::ToBase64String([IO.File]::ReadAllBytes('abb-upload.jks'))`.
 2. In GitHub, open **Settings → Secrets and variables → Actions → New repository secret**.
 3. Add these four repository secrets:
    - `SIGNING_KEYSTORE_BASE64`: Base64 encoding of the complete keystore file.
