@@ -238,7 +238,7 @@ class MainActivity : Activity() {
         })
         buildScreen()
         root.post {
-            rowHeight = ((root.height - dp(48) - dp(56)) - dp(56)).coerceAtLeast(dp(15)) / 15
+            rowHeight = (root.height - dp(48) - dp(56)).coerceAtLeast(dp(15)) / 15
             renderLists()
         }
         // Startup is cache-only: no permission checks, prompts, or package scan.
