@@ -15,11 +15,11 @@ android {
     namespace = "app.aaa"
     compileSdk = 35
     defaultConfig {
-        applicationId = "app.c11010250"
+        applicationId = "app.c11100343"
         minSdk = 29
         targetSdk = 35
-        versionCode = 11010250
-        versionName = "11010250"
+        versionCode = 11100343
+        versionName = "2026.11.10.0343"
         ndk { abiFilters += "arm64-v8a" }
     }
     if (hasReleaseSigning) {
