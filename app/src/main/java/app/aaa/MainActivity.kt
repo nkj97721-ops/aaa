@@ -480,16 +480,9 @@ class MainActivity : Activity() {
         refreshButton.alpha = 0.5f
         filter = null
         if (::lettersBar.isInitialized) lettersBar.childrenTextColor(null)
-        leftColumn.visibility = View.INVISIBLE
-        worker.execute {
-            val cached = loadCachedItems()
-            runOnUiThread {
-                items.clear(); items.addAll(cached)
-                renderLists()
-                leftColumn.visibility = View.VISIBLE
-                refreshAll()
-            }
-        }
+        // Keep the current list visible while permissions and package data refresh.
+        // The cached order is used as the baseline, but is not rendered as an intermediate state.
+        refreshAll()
     }
 
     private fun refreshAll() {
