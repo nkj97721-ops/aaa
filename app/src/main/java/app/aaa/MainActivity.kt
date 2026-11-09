@@ -360,7 +360,8 @@ class MainActivity : Activity() {
             alpha = if (item.disabled) 0.3f else 1f
             setPadding(dp(1), 0, dp(1), 0)
         }
-        row.addView(text(if (item.key in white) "☆" else "", 14f), LinearLayout.LayoutParams(dp(16), -2))
+        val star = text(if (item.key in white) "☆" else "", 14f)
+        row.addView(star, LinearLayout.LayoutParams(dp(16), -2))
         val iconFrame = FrameLayout(this)
         val icon = ImageView(this).apply {
             setImageBitmap(item.icon)
@@ -381,25 +382,24 @@ class MainActivity : Activity() {
         row.addView(label, LinearLayout.LayoutParams(0, -2, 1f))
         row.layoutParams = LinearLayout.LayoutParams(-1, rowHeight.coerceAtLeast(dp(36)))
 
+        var gestureConsumed = false
         val detector = GestureDetector(this, object : GestureDetector.SimpleOnGestureListener() {
-            private var swiped = false
             override fun onDown(e: MotionEvent) = true
             override fun onSingleTapUp(e: MotionEvent): Boolean {
-                if (!swiped) onItemClick(item)
-                swiped = false
+                if (!gestureConsumed) onItemClick(item)
                 return true
             }
             override fun onLongPress(e: MotionEvent) {
-                swiped = true
+                gestureConsumed = true
                 onItemLongPress(item)
             }
             override fun onScroll(e1: MotionEvent?, e2: MotionEvent, distanceX: Float, distanceY: Float): Boolean {
                 if (e1 != null && kotlin.math.abs(e2.x - e1.x) > ViewConfiguration.get(this@MainActivity).scaledTouchSlop &&
                     kotlin.math.abs(e2.x - e1.x) > kotlin.math.abs(e2.y - e1.y)) {
-                    if (!swiped) {
-                        swiped = true
+                    if (!gestureConsumed) {
+                        gestureConsumed = true
                         row.parent?.requestDisallowInterceptTouchEvent(true)
-                        toggleWhite(item)
+                        toggleWhite(item, star)
                     }
                     return true
                 }
@@ -407,18 +407,22 @@ class MainActivity : Activity() {
             }
         })
         row.setOnTouchListener { _, event ->
+            if (event.actionMasked == MotionEvent.ACTION_DOWN) gestureConsumed = false
+            val handled = detector.onTouchEvent(event)
             if (event.actionMasked == MotionEvent.ACTION_UP || event.actionMasked == MotionEvent.ACTION_CANCEL) {
                 row.parent?.requestDisallowInterceptTouchEvent(false)
+                gestureConsumed = false
             }
-            detector.onTouchEvent(event)
+            handled
         }
         return row
     }
 
-    private fun toggleWhite(item: Item) {
+    private fun toggleWhite(item: Item, star: TextView? = null) {
         if (!white.add(item.key)) white.remove(item.key)
         prefs.edit().putStringSet("white", white).apply()
-        renderLists()
+        star?.text = if (item.key in white) "☆" else ""
+        star?.invalidate()
     }
 
     private fun onItemClick(item: Item) {
