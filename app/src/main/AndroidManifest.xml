@@ -4,7 +4,7 @@
     <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES" tools:ignore="QueryAllPackagesPermission" />
     <uses-permission android:name="android.permission.PACKAGE_USAGE_STATS" tools:ignore="ProtectedPermissions" />
     <application
-        android:label="abb-11100343"
+        android:label="abb-11101708"
         android:icon="@mipmap/ic_launcher"
         android:theme="@style/AppTheme">
         <activity android:name=".MainActivity" android:exported="true">
