@@ -38,7 +38,7 @@ jobs:
           if-no-files-found: error
       # Stable pushes publish automatically using the ephemeral runner debug key.
       - name: Publish tagged APK
-        if: github.ref == "refs/heads/stable"
+        if: ${{ github.ref == 'refs/heads/stable' }}
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v2026.11.10.1708-run-${{ github.run_number }}
