@@ -122,6 +122,10 @@ class MainActivity : Activity() {
         return bitmap
     }
 
+    private fun saveLaunched() {
+        prefs.edit().putStringSet("launched", LinkedHashSet(launched.keys)).apply()
+    }
+
     private fun loadCachedItems(): List<Item> {
         val raw = prefs.getString("items_cache", null) ?: return emptyList()
         return try {
@@ -172,10 +176,12 @@ class MainActivity : Activity() {
         } else emptyMap()
         val out = ArrayList<Item>()
         for (u in users) {
-            val all = Sh.run("pm list packages -3 --user $u").lines()
+            // One Shizuku process per Android user instead of two separate shell launches.
+            val packageData = Sh.run("echo __ALL__; pm list packages -3 --user $u; echo __DISABLED__; pm list packages -3 -d --user $u")
+            val all = packageData.substringAfter("__ALL__").substringBefore("__DISABLED__").lines()
                 .mapNotNull { it.removePrefix("package:").trim().ifEmpty { null } }
-            val dis = Sh.run("pm list packages -3 -d --user $u").lines()
-                .map { it.removePrefix("package:").trim() }.toSet()
+            val dis = packageData.substringAfter("__DISABLED__").lines()
+                .map { it.removePrefix("package:").trim() }.filter { it.isNotEmpty() }.toSet()
             for (p in all) {
                 if (p == packageName) continue
                 try {
@@ -240,6 +246,7 @@ class MainActivity : Activity() {
         white.addAll(prefs.getStringSet("white", emptySet())!!.map { key ->
             if (':' in key) key else "$key:0"
         })
+        launched.putAll(prefs.getStringSet("launched", emptySet())!!.associateWith { System.currentTimeMillis() })
         buildScreen()
         root.post {
             rowHeight = (root.height - dp(48) - dp(56)).coerceAtLeast(dp(15)) / 15
@@ -454,8 +461,10 @@ class MainActivity : Activity() {
             runOnUiThread {
                 val index = items.indexOfFirst { it.key == item.key }
                 if (index >= 0) items[index] = items[index].copy(disabled = disabled)
-                if (success) launched[item.key] = System.currentTimeMillis()
-                else Toast.makeText(this, "启动失败：${item.label}", Toast.LENGTH_SHORT).show()
+                if (success) {
+                    launched[item.key] = System.currentTimeMillis()
+                    saveLaunched()
+                } else Toast.makeText(this, "启动失败：${item.label}", Toast.LENGTH_SHORT).show()
                 renderLists()
             }
         }
@@ -469,6 +478,7 @@ class MainActivity : Activity() {
                 val index = items.indexOfFirst { it.key == item.key }
                 if (index >= 0) items[index] = items[index].copy(disabled = disabled)
                 launched.remove(item.key)
+                saveLaunched()
                 renderLists()
             }
         }
@@ -535,6 +545,7 @@ class MainActivity : Activity() {
                     if (state != null) items[i] = items[i].copy(disabled = state)
                 }
                 targets.forEach { launched.remove(it.key) }
+                saveLaunched()
                 renderRight()
                 renderLeft()
             }
