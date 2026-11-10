@@ -3,37 +3,21 @@ plugins {
     id("org.jetbrains.kotlin.android")
 }
 
-val signingStoreFile = System.getenv("SIGNING_STORE_FILE")
-val signingStorePassword = System.getenv("SIGNING_STORE_PASSWORD")
-val signingKeyAlias = System.getenv("SIGNING_KEY_ALIAS")
-val signingKeyPassword = System.getenv("SIGNING_KEY_PASSWORD")
-val hasReleaseSigning = listOf(
-    signingStoreFile, signingStorePassword, signingKeyAlias, signingKeyPassword
-).all { !it.isNullOrBlank() }
-
 android {
     namespace = "app.aaa"
     compileSdk = 35
     defaultConfig {
-        applicationId = "app.c11100423"
+        applicationId = "app.c11101708"
         minSdk = 29
         targetSdk = 35
-        versionCode = 11100423
-        versionName = "2026.11.10.0423"
+        versionCode = 11101708
+        versionName = "2026.11.10.1708"
         ndk { abiFilters += "arm64-v8a" }
-    }
-    if (hasReleaseSigning) {
-        signingConfigs.create("stableRelease") {
-            storeFile = file(signingStoreFile!!)
-            storePassword = signingStorePassword
-            keyAlias = signingKeyAlias
-            keyPassword = signingKeyPassword
-        }
     }
     buildTypes {
         release {
-            signingConfig = if (hasReleaseSigning) signingConfigs.getByName("stableRelease")
-                else signingConfigs.getByName("debug")
+            // CI uses the runner debug key; this release is not guaranteed to update an installed APK.
+            signingConfig = signingConfigs.getByName("debug")
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
