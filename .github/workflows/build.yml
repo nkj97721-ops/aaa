@@ -4,8 +4,6 @@ on:
   push:
     branches:
       - "**"
-    tags:
-      - "v*"
   workflow_dispatch:
 
 permissions:
@@ -20,55 +18,30 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: "17"
-
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: "8.9"
-
-      # A tagged release must use the persistent upload key stored in GitHub
-      # Actions secrets. Ordinary branch builds may use the temporary debug key.
-      - name: Configure persistent release signing
-        if: startsWith(github.ref, 'refs/tags/v')
-        env:
-          SIGNING_KEYSTORE_BASE64: ${{ secrets.SIGNING_KEYSTORE_BASE64 }}
-          SIGNING_STORE_PASSWORD: ${{ secrets.SIGNING_STORE_PASSWORD }}
-          SIGNING_KEY_ALIAS: ${{ secrets.SIGNING_KEY_ALIAS }}
-          SIGNING_KEY_PASSWORD: ${{ secrets.SIGNING_KEY_PASSWORD }}
-        run: |
-          test -n "$SIGNING_KEYSTORE_BASE64" || { echo "Missing SIGNING_KEYSTORE_BASE64"; exit 1; }
-          test -n "$SIGNING_STORE_PASSWORD" || { echo "Missing SIGNING_STORE_PASSWORD"; exit 1; }
-          test -n "$SIGNING_KEY_ALIAS" || { echo "Missing SIGNING_KEY_ALIAS"; exit 1; }
-          test -n "$SIGNING_KEY_PASSWORD" || { echo "Missing SIGNING_KEY_PASSWORD"; exit 1; }
-          echo "$SIGNING_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/abb-release.jks"
-          echo "SIGNING_STORE_FILE=$RUNNER_TEMP/abb-release.jks" >> "$GITHUB_ENV"
-          echo "SIGNING_STORE_PASSWORD=$SIGNING_STORE_PASSWORD" >> "$GITHUB_ENV"
-          echo "SIGNING_KEY_ALIAS=$SIGNING_KEY_ALIAS" >> "$GITHUB_ENV"
-          echo "SIGNING_KEY_PASSWORD=$SIGNING_KEY_PASSWORD" >> "$GITHUB_ENV"
-
       - name: Run unit tests
         run: gradle test --no-daemon
-
       - name: Build release APK
         run: gradle assembleRelease --no-daemon
-
       - name: Verify release APK
         run: test -s app/build/outputs/apk/release/app-release.apk
-
       - uses: actions/upload-artifact@v4
         with:
           name: abb-release
           path: app/build/outputs/apk/release/app-release.apk
           if-no-files-found: error
-
-      # Never overwrite the stable release from a normal development-branch push.
+      # Stable pushes publish automatically using the ephemeral runner debug key.
       - name: Publish tagged APK
-        if: startsWith(github.ref, 'refs/tags/v')
+        if: github.ref == "refs/heads/stable"
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ github.ref_name }}
+          tag_name: v2026.11.10.1708-run-${{ github.run_number }}
+          name: ABB 2026.11.10.1708 (run ${{ github.run_number }})
+          target_commitish: ${{ github.sha }}
           files: app/build/outputs/apk/release/app-release.apk
