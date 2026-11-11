@@ -61,6 +61,10 @@ class MainActivity : Activity() {
     private val tr by lazy { android.icu.text.Transliterator.getInstance("Han-Latin; Latin-ASCII") }
     private val prefs by lazy { getSharedPreferences("p", Context.MODE_PRIVATE) }
     private val items = ArrayList<Item>()
+    // Reuse row views between refreshes; recreating every icon, label and gesture detector
+    // on the UI thread was a major source of refresh latency.
+    private val rowCache = HashMap<String, View>()
+    private val rowCacheSignature = HashMap<String, String>()
     private val launched = LinkedHashMap<String, Long>()
     private val white = LinkedHashSet<String>()
     private var filter: Char? = null
@@ -350,7 +354,7 @@ class MainActivity : Activity() {
         leftRows.removeAllViews()
         items.asSequence().distinctBy { it.key }
             .filter { filter == null || it.initial == filter }
-            .forEach { item -> leftRows.addView(makeItemRow(item)) }
+            .forEach { item -> leftRows.addView(cachedItemRow(item)) }
         leftRows.addView(View(this), LinearLayout.LayoutParams(1, dp(56)))
         leftScroll.post { leftScroll.scrollTo(0, y) }
     }
@@ -360,9 +364,19 @@ class MainActivity : Activity() {
         val y = rightScroll.scrollY
         rightRows.removeAllViews()
         items.filter { it.key in launched && !it.disabled }
-            .forEach { item -> rightRows.addView(makeItemRow(item)) }
+            .forEach { item -> rightRows.addView(cachedItemRow(item)) }
         rightRows.addView(View(this), LinearLayout.LayoutParams(1, dp(56)))
         rightScroll.post { rightScroll.scrollTo(0, y) }
+    }
+
+    private fun cachedItemRow(item: Item): View {
+        // Rows only need rebuilding when visible row content changes.
+        val signature = "${item.label}| ${item.initial}| ${item.user}| ${item.disabled}"
+        if (rowCacheSignature[item.key] != signature) {
+            rowCache[item.key] = makeItemRow(item)
+            rowCacheSignature[item.key] = signature
+        }
+        return rowCache.getValue(item.key)
     }
 
     private fun makeItemRow(item: Item): View {
