@@ -354,7 +354,7 @@ class MainActivity : Activity() {
         leftRows.removeAllViews()
         items.asSequence().distinctBy { it.key }
             .filter { filter == null || it.initial == filter }
-            .forEach { item -> leftRows.addView(cachedItemRow(item)) }
+            .forEach { item -> leftRows.addView(cachedItemRow(item, "left")) }
         leftRows.addView(View(this), LinearLayout.LayoutParams(1, dp(56)))
         leftScroll.post { leftScroll.scrollTo(0, y) }
     }
@@ -364,19 +364,20 @@ class MainActivity : Activity() {
         val y = rightScroll.scrollY
         rightRows.removeAllViews()
         items.filter { it.key in launched && !it.disabled }
-            .forEach { item -> rightRows.addView(cachedItemRow(item)) }
+            .forEach { item -> rightRows.addView(cachedItemRow(item, "right")) }
         rightRows.addView(View(this), LinearLayout.LayoutParams(1, dp(56)))
         rightScroll.post { rightScroll.scrollTo(0, y) }
     }
 
-    private fun cachedItemRow(item: Item): View {
-        // Rows only need rebuilding when visible row content changes.
-        val signature = "${item.label}| ${item.initial}| ${item.user}| ${item.disabled}"
-        if (rowCacheSignature[item.key] != signature) {
-            rowCache[item.key] = makeItemRow(item)
-            rowCacheSignature[item.key] = signature
+    private fun cachedItemRow(item: Item, column: String): View {
+        // Each column owns its own View; Android Views cannot have two parents.
+        val cacheKey = "$column:${item.key}"
+        val signature = "${item.label}|${item.initial}|${item.user}|${item.disabled}"
+        if (rowCacheSignature[cacheKey] != signature) {
+            rowCache[cacheKey] = makeItemRow(item)
+            rowCacheSignature[cacheKey] = signature
         }
-        return rowCache.getValue(item.key)
+        return rowCache.getValue(cacheKey)
     }
 
     private fun makeItemRow(item: Item): View {
