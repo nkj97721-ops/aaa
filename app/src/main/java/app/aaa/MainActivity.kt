@@ -505,8 +505,9 @@ class MainActivity : Activity() {
         refreshButton.alpha = 0.5f
         filter = null
         if (::lettersBar.isInitialized) lettersBar.childrenTextColor(null)
-        // Keep the current list visible while permissions and package data refresh.
-        // The cached order is used as the baseline, but is not rendered as an intermediate state.
+        // Show the already-loaded full list immediately, using the exact same render path
+        // as a letter tap. Permission checks and package enumeration happen afterwards.
+        renderLeft()
         refreshAll()
     }
 
