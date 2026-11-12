@@ -61,6 +61,12 @@ class MainActivity : Activity() {
     private val tr by lazy { android.icu.text.Transliterator.getInstance("Han-Latin; Latin-ASCII") }
     private val prefs by lazy { getSharedPreferences("p", Context.MODE_PRIVATE) }
     private val items = ArrayList<Item>()
+    // Reuse row views between refreshes; recreating every icon, label and gesture detector
+    // on the UI thread was a major source of refresh latency.
+    private val rowCache = HashMap<String, View>()
+    private val rowCacheSignature = HashMap<String, String>()
+    private var leftDisplayItems: List<Item> = emptyList()
+    private var leftRenderedCount = 0
     private val launched = LinkedHashMap<String, Long>()
     private val white = LinkedHashSet<String>()
     private var filter: Char? = null
@@ -288,7 +294,7 @@ class MainActivity : Activity() {
             letters.addView(letter, LinearLayout.LayoutParams(-1, 0, 1f))
             letter.setOnClickListener {
                 filter = ch
-                renderLeft()
+                renderLeft(resetToTop = true)
                 lettersBar.childrenTextColor(filter)
             }
         }
@@ -330,6 +336,10 @@ class MainActivity : Activity() {
         scroll.addView(rows, FrameLayout.LayoutParams(-1, -2))
         if (left) {
             leftScroll = scroll; leftRows = rows
+            scroll.setOnScrollChangeListener { v: View, _, scrollY, _, _ ->
+                val viewport = (v as ScrollView)
+                if (scrollY + viewport.height >= rows.height - dp(24)) appendLeftBatch()
+            }
         } else {
             rightScroll = scroll; rightRows = rows
         }
@@ -344,15 +354,36 @@ class MainActivity : Activity() {
         renderRight()
     }
 
-    private fun renderLeft() {
+    private fun renderLeft(resetToTop: Boolean = false) {
         if (!::leftRows.isInitialized) return
-        val y = leftScroll.scrollY
-        leftRows.removeAllViews()
-        items.asSequence().distinctBy { it.key }
+        leftDisplayItems = items.asSequence().distinctBy { it.key }
             .filter { filter == null || it.initial == filter }
-            .forEach { item -> leftRows.addView(makeItemRow(item)) }
-        leftRows.addView(View(this), LinearLayout.LayoutParams(1, dp(56)))
-        leftScroll.post { leftScroll.scrollTo(0, y) }
+            .toList()
+        leftRenderedCount = 0
+        leftRows.removeAllViews()
+        if (resetToTop) leftScroll.scrollTo(0, 0)
+        appendLeftBatch()
+    }
+
+    // Build the first screen in small chunks instead of creating every app row
+    // in one long main-thread pass. More rows are appended as the user scrolls.
+    private fun appendLeftBatch() {
+        if (!::leftRows.isInitialized || leftRenderedCount >= leftDisplayItems.size) return
+        val end = (leftRenderedCount + 15).coerceAtMost(leftDisplayItems.size)
+        for (index in leftRenderedCount until end) {
+            leftRows.addView(cachedItemRow(leftDisplayItems[index], "left"))
+        }
+        leftRenderedCount = end
+        if (leftRenderedCount >= leftDisplayItems.size) {
+            leftRows.addView(View(this), LinearLayout.LayoutParams(1, dp(56)))
+        } else {
+            // If the first batch does not make the ScrollView scrollable yet,
+            // append another batch after layout so the list can be scrolled.
+            leftRows.post {
+                if (leftRenderedCount < leftDisplayItems.size &&
+                    leftRows.height <= leftScroll.height + dp(2)) appendLeftBatch()
+            }
+        }
     }
 
     private fun renderRight() {
@@ -360,9 +391,20 @@ class MainActivity : Activity() {
         val y = rightScroll.scrollY
         rightRows.removeAllViews()
         items.filter { it.key in launched && !it.disabled }
-            .forEach { item -> rightRows.addView(makeItemRow(item)) }
+            .forEach { item -> rightRows.addView(cachedItemRow(item, "right")) }
         rightRows.addView(View(this), LinearLayout.LayoutParams(1, dp(56)))
         rightScroll.post { rightScroll.scrollTo(0, y) }
+    }
+
+    private fun cachedItemRow(item: Item, column: String): View {
+        // Each column owns its own View; Android Views cannot have two parents.
+        val cacheKey = "$column:${item.key}"
+        val signature = "${item.label}|${item.initial}|${item.user}|${item.disabled}"
+        if (rowCacheSignature[cacheKey] != signature) {
+            rowCache[cacheKey] = makeItemRow(item)
+            rowCacheSignature[cacheKey] = signature
+        }
+        return rowCache.getValue(cacheKey)
     }
 
     private fun makeItemRow(item: Item): View {
@@ -490,8 +532,9 @@ class MainActivity : Activity() {
         refreshButton.alpha = 0.5f
         filter = null
         if (::lettersBar.isInitialized) lettersBar.childrenTextColor(null)
-        // Keep the current list visible while permissions and package data refresh.
-        // The cached order is used as the baseline, but is not rendered as an intermediate state.
+        // Show the already-loaded full list immediately, using the exact same render path
+        // as a letter tap. Permission checks and package enumeration happen afterwards.
+        renderLeft(resetToTop = true)
         refreshAll()
     }
 
@@ -519,7 +562,8 @@ class MainActivity : Activity() {
                         saveCachedItems(fresh)
                         runOnUiThread {
                             items.clear(); items.addAll(fresh)
-                            renderLists()
+                            renderLeft(resetToTop = true)
+                            renderRight()
                             finishRefresh()
                         }
                     }
