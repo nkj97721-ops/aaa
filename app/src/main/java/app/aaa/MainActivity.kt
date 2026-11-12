@@ -174,13 +174,10 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun launch(it: Item) {
-        // Enable the package for the selected Android user before starting its launcher activity.
         if (it.disabled) {
             Sh.run("pm enable --user ${it.user} ${it.pkg}")
             Thread.sleep(350)
         }
-        // "monkey --user" is not a supported Android Monkey option. Use ActivityManager's
-        // user-aware intent resolution so cloned/work-profile apps launch in their own user.
         Sh.run(
             "am start --user ${it.user} " +
                 "-a android.intent.action.MAIN " +
@@ -215,21 +212,29 @@ class MainActivity : ComponentActivity() {
             }
             var filter by remember { mutableStateOf<Char?>(null) }
             val leftState = rememberLazyListState()
-            var needReload by remember { mutableStateOf(true) }
-                        val refreshMutex = remember { kotlinx.coroutines.sync.Mutex() }
+            val refreshMutex = remember { kotlinx.coroutines.sync.Mutex() }
+            var refreshing by remember { mutableStateOf(false) }
 
             suspend fun refreshAll() {
-                refreshMutex.withLock {
-                    val cached = withContext(Dispatchers.IO) { loadCachedItems() }
-                    if (cached.isNotEmpty()) {
-                        items = cached
-                     }
-                    if (granted()) {
-                        val fresh = withContext(Dispatchers.IO) { loadItems(cached) }
-                        items = fresh
-                         withContext(Dispatchers.IO) { saveCachedItems(fresh) }
-                        needReload = false
+                if (!refreshMutex.tryLock()) return
+                try {
+                    refreshing = true
+                    // Reuse the already-rendered in-memory list. Do not decode every cached
+                    // icon again when the user taps Refresh.
+                    val snapshot = items
+                    val base = if (snapshot.isNotEmpty()) snapshot else
+                        withContext(Dispatchers.IO) { loadCachedItems() }
+                    if (snapshot.isEmpty() && base.isNotEmpty()) {
+                        withContext(Dispatchers.Main) { items = base }
                     }
+                    if (granted()) {
+                        val fresh = withContext(Dispatchers.IO) { loadItems(base) }
+                        withContext(Dispatchers.Main) { items = fresh; filter = null }
+                        withContext(Dispatchers.IO) { saveCachedItems(fresh) }
+                    }
+                } finally {
+                    refreshing = false
+                    refreshMutex.unlock()
                 }
             }
 
@@ -237,26 +242,14 @@ class MainActivity : ComponentActivity() {
                 if (filter == null) leftState.scrollToItem(0)
             }
 
-            LaunchedEffect(Unit) {
-                refreshAll()
-                var previousUsageAccess = hasUsageAccess()
-                while (true) {
-                    if (granted()) {
-                        val usageAccess = hasUsageAccess()
-                        if (usageAccess && !previousUsageAccess) needReload = true
-                        previousUsageAccess = usageAccess
-                        if (needReload) refreshAll()
-                    } else if (Shizuku.pingBinder()) Shizuku.requestPermission(0)
-                    delay(2000)
-                }
-            }
+            LaunchedEffect(Unit) { refreshAll() }
 
             fun toggleWhite(item: Item) {
                 val key = item.key
                 white = if (key in white) white - key else white + key
                 prefs.edit().putStringSet("white", white).apply()
             }
-            fun act(block: () -> Unit) = scope.launch(Dispatchers.IO) { block(); needReload = true }
+            fun act(block: () -> Unit) = scope.launch(Dispatchers.IO) { block() }
             fun act(item: Item, block: () -> Unit) = scope.launch(Dispatchers.IO) {
                 block()
                 val disabled = isPackageDisabled(item)
@@ -270,7 +263,19 @@ class MainActivity : ComponentActivity() {
 
             Box(Modifier.fillMaxSize().background(Color.Black)) {
                 Column(Modifier.fillMaxSize()) {
-                    Spacer(Modifier.height(48.dp))
+                    Row(
+                        Modifier.fillMaxWidth().height(48.dp).padding(horizontal = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        T("abb", c = Color.White, s = 14)
+                        Spacer(Modifier.weight(1f))
+                        Box(
+                            Modifier.clickable { scope.launch { refreshAll() } }
+                                .padding(horizontal = 14.dp, vertical = 8.dp),
+                        ) {
+                            T(if (refreshing) "刷新中" else "刷新", c = Color.White, s = 14)
+                        }
+                    }
                     Row(Modifier.weight(1f).fillMaxWidth()) {
                         AppList(left, white, leftState, Modifier.weight(1f).padding(end = 14.dp), 0.dp,
                             { i -> act(i) { launch(i); launched[i.key] = System.currentTimeMillis() } },
