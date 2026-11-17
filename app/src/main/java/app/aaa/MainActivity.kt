@@ -355,7 +355,7 @@ class MainActivity : Activity() {
         val visible = items.asSequence().distinctBy { it.key }
             .filter { filter == null || it.initial == filter }
             .toList()
-        renderAppGrid(leftRows, visible, 4)
+        renderAppGrid(leftRows, visible, 4, bottomOrigin = true)
         if (resetToTop) leftScroll.post { leftScroll.scrollTo(0, 0) }
         else leftScroll.post { leftScroll.scrollTo(0, y) }
     }
@@ -365,26 +365,39 @@ class MainActivity : Activity() {
         val y = rightScroll.scrollY
         rightRows.removeAllViews()
         val visible = items.filter { it.key in launched && !it.disabled }
-        renderAppGrid(rightRows, visible, 4)
+        renderAppGrid(rightRows, visible, 4, bottomOrigin = false)
         if (resetToTop) rightScroll.post { rightScroll.scrollTo(0, 0) }
         else rightScroll.post { rightScroll.scrollTo(0, y) }
     }
 
-    private fun renderAppGrid(container: LinearLayout, source: List<Item>, columns: Int) {
+    private fun renderAppGrid(
+        container: LinearLayout,
+        source: List<Item>,
+        columns: Int,
+        bottomOrigin: Boolean,
+    ) {
+        // Never sort or reverse the source list: its order is the default app sequence.
+        // In the upper zone, index 0 maps to the bottom-right cell, then indices
+        // increase right-to-left; after each row the next items occupy the row above.
         source.chunked(columns).forEach { group ->
             val gridRow = LinearLayout(this).apply {
                 orientation = LinearLayout.HORIZONTAL
                 gravity = android.view.Gravity.CENTER
             }
-            // The upper zone is a bottom-origin grid: first item starts at bottom-right,
-            // then fills right-to-left before moving to the row above.
-            // Keep the first item pinned to the far right, including the final
-            // incomplete row. Empty cells belong before the reversed items.
-            repeat(columns - group.size) {
-                gridRow.addView(View(this), LinearLayout.LayoutParams(0, dp(78), 1f))
-            }
-            group.asReversed().forEach { item ->
-                gridRow.addView(makeItemRow(item), LinearLayout.LayoutParams(0, dp(78), 1f))
+            if (bottomOrigin) {
+                repeat(columns - group.size) {
+                    gridRow.addView(View(this), LinearLayout.LayoutParams(0, dp(78), 1f))
+                }
+                group.asReversed().forEach { item ->
+                    gridRow.addView(makeItemRow(item), LinearLayout.LayoutParams(0, dp(78), 1f))
+                }
+            } else {
+                group.forEach { item ->
+                    gridRow.addView(makeItemRow(item), LinearLayout.LayoutParams(0, dp(78), 1f))
+                }
+                repeat(columns - group.size) {
+                    gridRow.addView(View(this), LinearLayout.LayoutParams(0, dp(78), 1f))
+                }
             }
             container.addView(gridRow, LinearLayout.LayoutParams(-1, dp(78)))
         }
