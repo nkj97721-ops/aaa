@@ -351,8 +351,8 @@ class MainActivity : Activity() {
         val visible = items.asSequence().distinctBy { it.key }
             .filter { filter == null || it.initial == filter }
             .toList()
-        renderAppGrid(leftRows, visible, 4)
-        if (resetToTop) leftScroll.post { leftScroll.scrollTo(0, 0) }
+        renderAppGrid(leftRows, visible, 4, thumbOrigin = true)
+        if (resetToTop) leftScroll.post { leftScroll.scrollTo(0, leftRows.height) }
         else leftScroll.post { leftScroll.scrollTo(0, y) }
     }
 
@@ -371,14 +371,19 @@ class MainActivity : Activity() {
         source: List<Item>,
         columns: Int,
     ) {
-        // Natural reading order: first item at top-left, then left-to-right,
-        // continuing on the next row. Keep the source sequence unchanged.
-        source.chunked(columns).forEach { group ->
+        thumbOrigin: Boolean = false,
+    ) {
+        // For the upper app area, the first item starts at bottom-right.
+        // Fill each row right-to-left, then continue on the row above.
+        val groups = source.chunked(columns)
+        val orderedGroups = if (thumbOrigin) groups.asReversed() else groups
+        orderedGroups.forEach { group ->
+            val orderedItems = if (thumbOrigin) group.asReversed() else group
             val gridRow = LinearLayout(this).apply {
                 orientation = LinearLayout.HORIZONTAL
-                gravity = android.view.Gravity.START
+                gravity = if (thumbOrigin) android.view.Gravity.END else android.view.Gravity.START
             }
-            group.forEach { item ->
+            orderedItems.forEach { item ->
                 gridRow.addView(makeItemRow(item), LinearLayout.LayoutParams(0, dp(78), 1f))
             }
             repeat(columns - group.size) {
