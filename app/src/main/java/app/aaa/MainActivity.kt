@@ -373,7 +373,9 @@ class MainActivity : Activity() {
                 orientation = LinearLayout.HORIZONTAL
                 gravity = android.view.Gravity.CENTER
             }
-            group.forEach { item ->
+            // The upper zone is a bottom-origin grid: first item starts at bottom-right,
+            // then fills right-to-left before moving to the row above.
+            group.asReversed().forEach { item ->
                 gridRow.addView(makeItemRow(item), LinearLayout.LayoutParams(0, dp(78), 1f))
             }
             repeat(columns - group.size) {
@@ -510,8 +512,9 @@ class MainActivity : Activity() {
         refreshButton.alpha = 0.5f
         filter = null
         if (::lettersBar.isInitialized) lettersBar.childrenTextColor(null)
-        // Keep the current list visible while permissions and package data refresh.
-        // The cached order is used as the baseline, but is not rendered as an intermediate state.
+        // Render the already-loaded list immediately, just like a letter-filter tap.
+        // Permission checks and the Shizuku package scan continue off the UI thread.
+        renderLeft(resetToTop = true)
         refreshAll()
     }
 
