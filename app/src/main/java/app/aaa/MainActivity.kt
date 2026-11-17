@@ -374,8 +374,19 @@ class MainActivity : Activity() {
         } finally {
             leftRows.suppressLayout(false)
         }
-        if (resetToTop) leftScroll.scrollTo(0, leftRows.height)
-        else leftScroll.scrollTo(0, y)
+        if (resetToTop) {
+            // Measure the replacement content before the next frame, then set
+            // the final bottom-origin scroll offset synchronously. Never draw
+            // the previous/top (last-app) position as an intermediate frame.
+            val widthSpec = View.MeasureSpec.makeMeasureSpec(leftScroll.width, View.MeasureSpec.EXACTLY)
+            val heightSpec = View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED)
+            leftRows.measure(widthSpec, heightSpec)
+            val targetY = (leftRows.measuredHeight - leftScroll.height).coerceAtLeast(0)
+            leftScroll.scrollTo(0, targetY)
+        } else {
+            leftScroll.scrollTo(0, y)
+        }
+        leftScroll.requestLayout()
     }
 
     private fun renderRight(resetToTop: Boolean = false) {
