@@ -279,7 +279,7 @@ class MainActivity : Activity() {
         toolbar.addView(bulkDisableButton, LinearLayout.LayoutParams(0, dp(44), 1f))
         content.addView(toolbar, LinearLayout.LayoutParams(-1, dp(44)))
 
-        leftScroll = makeAppScroll(inverted = true)
+        leftScroll = makeAppScroll()
         leftRows = leftScroll.getChildAt(0) as LinearLayout
         content.addView(leftScroll, LinearLayout.LayoutParams(-1, 0, 3f))
 
@@ -307,7 +307,7 @@ class MainActivity : Activity() {
         }
         content.addView(letters, LinearLayout.LayoutParams(-1, 0, 1f))
 
-        rightScroll = makeAppScroll(inverted = false)
+        rightScroll = makeAppScroll()
         rightRows = rightScroll.getChildAt(0) as LinearLayout
         content.addView(rightScroll, LinearLayout.LayoutParams(-1, 0, 1f))
 
@@ -315,20 +315,16 @@ class MainActivity : Activity() {
         setContentView(root)
     }
 
-    private fun makeAppScroll(inverted: Boolean): ScrollView {
+    private fun makeAppScroll(): ScrollView {
         val rows = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            gravity = if (inverted) android.view.Gravity.BOTTOM else android.view.Gravity.TOP
+            gravity = android.view.Gravity.TOP
             setBackgroundColor(BLACK)
-            if (inverted) scaleY = -1f
         }
         return ScrollView(this).apply {
-            // Fill short lists so the inverted upper list stays anchored to the
-            // bottom edge instead of appearing at the top with empty space below.
             isFillViewport = true
             overScrollMode = View.OVER_SCROLL_NEVER
             setBackgroundColor(BLACK)
-            if (inverted) scaleY = -1f
             addView(rows, FrameLayout.LayoutParams(-1, -2))
         }
     }
@@ -355,7 +351,7 @@ class MainActivity : Activity() {
         val visible = items.asSequence().distinctBy { it.key }
             .filter { filter == null || it.initial == filter }
             .toList()
-        renderAppGrid(leftRows, visible, 4, bottomOrigin = true)
+        renderAppGrid(leftRows, visible, 4)
         if (resetToTop) leftScroll.post { leftScroll.scrollTo(0, 0) }
         else leftScroll.post { leftScroll.scrollTo(0, y) }
     }
@@ -365,7 +361,7 @@ class MainActivity : Activity() {
         val y = rightScroll.scrollY
         rightRows.removeAllViews()
         val visible = items.filter { it.key in launched && !it.disabled }
-        renderAppGrid(rightRows, visible, 4, bottomOrigin = false)
+        renderAppGrid(rightRows, visible, 4)
         if (resetToTop) rightScroll.post { rightScroll.scrollTo(0, 0) }
         else rightScroll.post { rightScroll.scrollTo(0, y) }
     }
@@ -374,30 +370,19 @@ class MainActivity : Activity() {
         container: LinearLayout,
         source: List<Item>,
         columns: Int,
-        bottomOrigin: Boolean,
     ) {
-        // Never sort or reverse the source list: its order is the default app sequence.
-        // In the upper zone, index 0 maps to the bottom-right cell, then indices
-        // increase right-to-left; after each row the next items occupy the row above.
+        // Natural reading order: first item at top-left, then left-to-right,
+        // continuing on the next row. Keep the source sequence unchanged.
         source.chunked(columns).forEach { group ->
             val gridRow = LinearLayout(this).apply {
                 orientation = LinearLayout.HORIZONTAL
-                gravity = android.view.Gravity.CENTER
+                gravity = android.view.Gravity.START
             }
-            if (bottomOrigin) {
-                repeat(columns - group.size) {
-                    gridRow.addView(View(this), LinearLayout.LayoutParams(0, dp(78), 1f))
-                }
-                group.asReversed().forEach { item ->
-                    gridRow.addView(makeItemRow(item), LinearLayout.LayoutParams(0, dp(78), 1f))
-                }
-            } else {
-                group.forEach { item ->
-                    gridRow.addView(makeItemRow(item), LinearLayout.LayoutParams(0, dp(78), 1f))
-                }
-                repeat(columns - group.size) {
-                    gridRow.addView(View(this), LinearLayout.LayoutParams(0, dp(78), 1f))
-                }
+            group.forEach { item ->
+                gridRow.addView(makeItemRow(item), LinearLayout.LayoutParams(0, dp(78), 1f))
+            }
+            repeat(columns - group.size) {
+                gridRow.addView(View(this), LinearLayout.LayoutParams(0, dp(78), 1f))
             }
             container.addView(gridRow, LinearLayout.LayoutParams(-1, dp(78)))
         }
