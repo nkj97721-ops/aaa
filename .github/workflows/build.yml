@@ -23,9 +23,8 @@ jobs:
         with:
           distribution: temurin
           java-version: "17"
-      - uses: gradle/actions/setup-gradle@v4
-        with:
-          gradle-version: "8.9"
+      - name: Check preinstalled Gradle
+        run: gradle --version
       - name: Run unit tests
         run: timeout 8m gradle test --no-daemon --console=plain
       - name: Build release APK
