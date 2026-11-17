@@ -367,8 +367,9 @@ class MainActivity : Activity() {
             leftRows.removeAllViews()
             while (nextRows.childCount > 0) {
                 val child = nextRows.getChildAt(0)
+                val params = child.layoutParams
                 nextRows.removeViewAt(0)
-                leftRows.addView(child, LinearLayout.LayoutParams(-1, dp(78)))
+                leftRows.addView(child, params)
             }
         } finally {
             leftRows.suppressLayout(false)
