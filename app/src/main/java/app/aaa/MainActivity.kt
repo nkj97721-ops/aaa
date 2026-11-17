@@ -75,7 +75,6 @@ class MainActivity : Activity() {
     private lateinit var refreshButton: TextView
     private lateinit var lettersBar: LinearLayout
     private lateinit var bulkDisableButton: TextView
-    private var rowHeight = 48
 
     private fun dp(v: Int): Int = (v * resources.displayMetrics.density + 0.5f).toInt()
     private fun text(value: String, size: Float, color: Int = WHITE): TextView =
@@ -249,7 +248,6 @@ class MainActivity : Activity() {
         launched.putAll(prefs.getStringSet("launched", emptySet())!!.associateWith { System.currentTimeMillis() })
         buildScreen()
         root.post {
-            rowHeight = (root.height - dp(48) - dp(56)).coerceAtLeast(dp(15)) / 15
             renderLists()
         }
         // Startup is cache-only: no permission checks, prompts, or package scan.
@@ -269,130 +267,168 @@ class MainActivity : Activity() {
             orientation = LinearLayout.VERTICAL
             setBackgroundColor(BLACK)
         }
+        // Keep the status-bar inset, then put both global actions within thumb reach.
         content.addView(View(this), LinearLayout.LayoutParams(-1, dp(48)))
-        val columns = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-        leftColumn = makeAppColumn(true)
-        rightColumn = makeAppColumn(false)
-        columns.addView(leftColumn, LinearLayout.LayoutParams(0, -1, 1f))
-        columns.addView(rightColumn, LinearLayout.LayoutParams(0, -1, 1f))
-        content.addView(columns, LinearLayout.LayoutParams(-1, 0, 1f))
-        root.addView(content, FrameLayout.LayoutParams(-1, -1))
+        val toolbar = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            setBackgroundColor(BLACK)
+        }
+        refreshButton = text("刷新", 15f).apply { setOnClickListener { refresh() } }
+        bulkDisableButton = text("停用", 15f).apply { setOnClickListener { bulkDisable() } }
+        toolbar.addView(refreshButton, LinearLayout.LayoutParams(0, dp(44), 1f))
+        toolbar.addView(bulkDisableButton, LinearLayout.LayoutParams(0, dp(44), 1f))
+        content.addView(toolbar, LinearLayout.LayoutParams(-1, dp(44)))
+
+        leftScroll = makeAppScroll()
+        leftRows = leftScroll.getChildAt(0) as LinearLayout
+        content.addView(leftScroll, LinearLayout.LayoutParams(-1, 0, 3f))
 
         val letters = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             gravity = android.view.Gravity.CENTER
+            setBackgroundColor(BLACK)
         }
         lettersBar = letters
-        ("ABCDEFGHIJKLMNOPQRSTUVWXYZ").forEach { ch ->
-            val letter = text(ch.toString(), 11f, GREY)
-            letters.addView(letter, LinearLayout.LayoutParams(-1, 0, 1f))
-            letter.setOnClickListener {
-                filter = ch
-                renderLeft()
-                lettersBar.childrenTextColor(filter)
+        val alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+        for (rowIndex in 0..1) {
+            val letterRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+            for (columnIndex in 0..12) {
+                val index = rowIndex * 13 + columnIndex
+                val ch = alphabet[index]
+                val letter = text(ch.toString(), 12f, GREY)
+                letter.setOnClickListener {
+                    filter = ch
+                    renderLeft(resetToTop = true)
+                    lettersBar.childrenTextColor(filter)
+                }
+                letterRow.addView(letter, LinearLayout.LayoutParams(0, -1, 1f))
             }
+            letters.addView(letterRow, LinearLayout.LayoutParams(-1, 0, 1f))
         }
-        root.addView(letters, FrameLayout.LayoutParams(dp(40), -1, android.view.Gravity.CENTER).apply {
-            topMargin = dp(48); bottomMargin = dp(8)
-        })
+        content.addView(letters, LinearLayout.LayoutParams(-1, 0, 1f))
 
-        refreshButton = text("刷新", 16f).apply {
-            setOnClickListener { refresh() }
-        }
-        bulkDisableButton = text("停用", 16f).apply {
-            setOnClickListener { bulkDisable() }
-        }
-        root.addView(refreshButton, FrameLayout.LayoutParams(0, dp(56), android.view.Gravity.BOTTOM or android.view.Gravity.START).apply {
-            width = resources.displayMetrics.widthPixels / 2 - dp(20)
-            marginEnd = dp(20)
-        })
-        root.addView(bulkDisableButton, FrameLayout.LayoutParams(0, dp(56), android.view.Gravity.BOTTOM or android.view.Gravity.END).apply {
-            width = resources.displayMetrics.widthPixels / 2 - dp(20)
-            marginStart = dp(20)
-        })
+        rightScroll = makeAppScroll()
+        rightRows = rightScroll.getChildAt(0) as LinearLayout
+        content.addView(rightScroll, LinearLayout.LayoutParams(-1, 0, 1f))
+
+        root.addView(content, FrameLayout.LayoutParams(-1, -1))
         setContentView(root)
+    }
+
+    private fun makeAppScroll(): ScrollView {
+        val rows = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = android.view.Gravity.TOP
+            setBackgroundColor(BLACK)
+        }
+        return ScrollView(this).apply {
+            isFillViewport = true
+            overScrollMode = View.OVER_SCROLL_NEVER
+            setBackgroundColor(BLACK)
+            addView(rows, FrameLayout.LayoutParams(-1, -2))
+        }
     }
 
     private fun LinearLayout.childrenTextColor(selected: Char?) {
         for (i in 0 until childCount) {
-            val child = getChildAt(i) as? TextView ?: continue
-            child.setTextColor(if (child.text.firstOrNull() == selected) WHITE else GREY)
+            val row = getChildAt(i) as? LinearLayout ?: continue
+            for (j in 0 until row.childCount) {
+                val child = row.getChildAt(j) as? TextView ?: continue
+                child.setTextColor(if (child.text.firstOrNull() == selected) WHITE else GREY)
+            }
         }
-    }
-
-    private fun makeAppColumn(left: Boolean): LinearLayout {
-        val scroll = ScrollView(this).apply {
-            isFillViewport = false
-            overScrollMode = View.OVER_SCROLL_NEVER
-            setBackgroundColor(BLACK)
-        }
-        val rows = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        scroll.addView(rows, FrameLayout.LayoutParams(-1, -2))
-        if (left) {
-            leftScroll = scroll; leftRows = rows
-        } else {
-            rightScroll = scroll; rightRows = rows
-        }
-        val column = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        column.addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f))
-        column.setPadding(if (left) 0 else dp(20), 0, if (left) dp(20) else 0, 0)
-        return column
     }
 
     private fun renderLists() {
-        renderLeft()
-        renderRight()
+        renderLeft(resetToTop = true)
+        renderRight(resetToTop = true)
     }
 
-    private fun renderLeft() {
+    private fun renderLeft(resetToTop: Boolean = false) {
         if (!::leftRows.isInitialized) return
         val y = leftScroll.scrollY
         leftRows.removeAllViews()
-        items.asSequence().distinctBy { it.key }
+        val visible = items.asSequence().distinctBy { it.key }
             .filter { filter == null || it.initial == filter }
-            .forEach { item -> leftRows.addView(makeItemRow(item)) }
-        leftRows.addView(View(this), LinearLayout.LayoutParams(1, dp(56)))
-        leftScroll.post { leftScroll.scrollTo(0, y) }
+            .toList()
+        renderAppGrid(leftRows, visible, 4, thumbOrigin = true)
+        if (resetToTop) leftScroll.post { leftScroll.scrollTo(0, leftRows.height) }
+        else leftScroll.post { leftScroll.scrollTo(0, y) }
     }
 
-    private fun renderRight() {
+    private fun renderRight(resetToTop: Boolean = false) {
         if (!::rightRows.isInitialized) return
         val y = rightScroll.scrollY
         rightRows.removeAllViews()
-        items.filter { it.key in launched && !it.disabled }
-            .forEach { item -> rightRows.addView(makeItemRow(item)) }
-        rightRows.addView(View(this), LinearLayout.LayoutParams(1, dp(56)))
-        rightScroll.post { rightScroll.scrollTo(0, y) }
+        val visible = items.filter { it.key in launched && !it.disabled }
+        renderAppGrid(rightRows, visible, 4)
+        if (resetToTop) rightScroll.post { rightScroll.scrollTo(0, 0) }
+        else rightScroll.post { rightScroll.scrollTo(0, y) }
+    }
+
+    private fun renderAppGrid(
+        container: LinearLayout,
+        source: List<Item>,
+        columns: Int,
+        thumbOrigin: Boolean = false,
+    ) {
+        // For the upper app area, the first item starts at bottom-right.
+        // Fill each row right-to-left, then continue on the row above.
+        val groups = source.chunked(columns)
+        val orderedGroups = if (thumbOrigin) groups.asReversed() else groups
+        orderedGroups.forEach { group ->
+            val orderedItems = if (thumbOrigin) group.asReversed() else group
+            val gridRow = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = if (thumbOrigin) android.view.Gravity.END else android.view.Gravity.START
+            }
+            if (thumbOrigin) {
+                repeat(columns - group.size) {
+                    gridRow.addView(View(this), LinearLayout.LayoutParams(0, dp(78), 1f))
+                }
+            }
+            orderedItems.forEach { item ->
+                gridRow.addView(makeItemRow(item), LinearLayout.LayoutParams(0, dp(78), 1f))
+            }
+            if (!thumbOrigin) {
+                repeat(columns - group.size) {
+                    gridRow.addView(View(this), LinearLayout.LayoutParams(0, dp(78), 1f))
+                }
+            }
+            container.addView(gridRow, LinearLayout.LayoutParams(-1, dp(78)))
+        }
+        container.addView(View(this), LinearLayout.LayoutParams(1, dp(12)))
     }
 
     private fun makeItemRow(item: Item): View {
-        val row = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
+        val tile = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
             gravity = android.view.Gravity.CENTER
             alpha = if (item.disabled) 0.3f else 1f
-            setPadding(dp(1), 0, dp(1), 0)
+            setPadding(dp(2), dp(2), dp(2), dp(2))
         }
-        val star = text(if (item.key in white) "☆" else "", 14f)
-        row.addView(star, LinearLayout.LayoutParams(dp(16), -2))
         val iconFrame = FrameLayout(this)
         val icon = ImageView(this).apply {
             setImageBitmap(item.icon)
             scaleType = ImageView.ScaleType.FIT_CENTER
         }
-        iconFrame.addView(icon, FrameLayout.LayoutParams(dp(42), dp(42)))
+        iconFrame.addView(icon, FrameLayout.LayoutParams(dp(42), dp(42), android.view.Gravity.CENTER))
         if (item.user != 0) {
-            val badge = text(item.user.toString(), 8f, BLACK).apply { setBackgroundColor(0xFF00FF00.toInt()) }
+            val badge = text(item.user.toString(), 8f, BLACK).apply {
+                setBackgroundColor(0xFF00FF00.toInt())
+                setPadding(dp(2), 0, dp(2), 0)
+            }
             iconFrame.addView(badge, FrameLayout.LayoutParams(-2, -2, android.view.Gravity.BOTTOM or android.view.Gravity.END))
         }
-        row.addView(iconFrame, LinearLayout.LayoutParams(dp(42), dp(42)))
-        row.addView(View(this), LinearLayout.LayoutParams(dp(8), 1))
-        val label = text(item.label, 14f).apply {
-            gravity = android.view.Gravity.CENTER_VERTICAL
-            maxLines = 1
+        val star = text(if (item.key in white) "☆" else "", 12f)
+        iconFrame.addView(star, FrameLayout.LayoutParams(dp(14), dp(14), android.view.Gravity.TOP or android.view.Gravity.START))
+        tile.addView(iconFrame, LinearLayout.LayoutParams(dp(44), dp(44)))
+        val label = text(item.label, 10f).apply {
+            maxLines = 2
             ellipsize = android.text.TextUtils.TruncateAt.END
+            gravity = android.view.Gravity.TOP or android.view.Gravity.CENTER_HORIZONTAL
         }
-        row.addView(label, LinearLayout.LayoutParams(0, -2, 1f))
-        row.layoutParams = LinearLayout.LayoutParams(-1, rowHeight.coerceAtLeast(dp(36)))
+        tile.addView(label, LinearLayout.LayoutParams(-1, 0, 1f))
 
         var gestureConsumed = false
         var touchStartX = 0f
@@ -414,7 +450,7 @@ class MainActivity : Activity() {
                     kotlin.math.abs(e2.x - e1.x) > kotlin.math.abs(e2.y - e1.y)) {
                     if (!gestureConsumed) {
                         gestureConsumed = true
-                        row.parent?.requestDisallowInterceptTouchEvent(true)
+                        tile.parent?.requestDisallowInterceptTouchEvent(true)
                         toggleWhite(item, star)
                     }
                     return true
@@ -422,7 +458,7 @@ class MainActivity : Activity() {
                 return false
             }
         }).apply { setIsLongpressEnabled(false) }
-        row.setOnTouchListener { _, event ->
+        tile.setOnTouchListener { _, event ->
             when (event.actionMasked) {
                 MotionEvent.ACTION_DOWN -> {
                     gestureConsumed = false
@@ -439,12 +475,12 @@ class MainActivity : Activity() {
             val handled = detector.onTouchEvent(event)
             if (event.actionMasked == MotionEvent.ACTION_UP || event.actionMasked == MotionEvent.ACTION_CANCEL) {
                 handler.removeCallbacks(longPress)
-                row.parent?.requestDisallowInterceptTouchEvent(false)
+                tile.parent?.requestDisallowInterceptTouchEvent(false)
                 gestureConsumed = false
             }
             handled
         }
-        return row
+        return tile
     }
 
     private fun toggleWhite(item: Item, star: TextView? = null) {
@@ -490,8 +526,9 @@ class MainActivity : Activity() {
         refreshButton.alpha = 0.5f
         filter = null
         if (::lettersBar.isInitialized) lettersBar.childrenTextColor(null)
-        // Keep the current list visible while permissions and package data refresh.
-        // The cached order is used as the baseline, but is not rendered as an intermediate state.
+        // Render the already-loaded list immediately, just like a letter-filter tap.
+        // Permission checks and the Shizuku package scan continue off the UI thread.
+        renderLeft(resetToTop = true)
         refreshAll()
     }
 

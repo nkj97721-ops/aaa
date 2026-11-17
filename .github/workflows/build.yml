@@ -16,19 +16,19 @@ concurrency:
 jobs:
   apk:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: "17"
-      - uses: gradle/actions/setup-gradle@v4
-        with:
-          gradle-version: "8.9"
+      - name: Check preinstalled Gradle
+        run: gradle --version
       - name: Run unit tests
-        run: gradle test --no-daemon
+        run: timeout 8m gradle test --no-daemon --console=plain
       - name: Build release APK
-        run: gradle assembleRelease --no-daemon
+        run: timeout 6m gradle assembleRelease --no-daemon --console=plain
       - name: Verify release APK
         run: test -s app/build/outputs/apk/release/app-release.apk
       - uses: actions/upload-artifact@v4
