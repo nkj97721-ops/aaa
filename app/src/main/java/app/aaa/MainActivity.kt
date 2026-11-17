@@ -375,11 +375,13 @@ class MainActivity : Activity() {
             }
             // The upper zone is a bottom-origin grid: first item starts at bottom-right,
             // then fills right-to-left before moving to the row above.
-            group.asReversed().forEach { item ->
-                gridRow.addView(makeItemRow(item), LinearLayout.LayoutParams(0, dp(78), 1f))
-            }
+            // Keep the first item pinned to the far right, including the final
+            // incomplete row. Empty cells belong before the reversed items.
             repeat(columns - group.size) {
                 gridRow.addView(View(this), LinearLayout.LayoutParams(0, dp(78), 1f))
+            }
+            group.asReversed().forEach { item ->
+                gridRow.addView(makeItemRow(item), LinearLayout.LayoutParams(0, dp(78), 1f))
             }
             container.addView(gridRow, LinearLayout.LayoutParams(-1, dp(78)))
         }
