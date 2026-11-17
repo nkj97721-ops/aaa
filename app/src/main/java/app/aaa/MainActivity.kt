@@ -318,11 +318,14 @@ class MainActivity : Activity() {
     private fun makeAppScroll(inverted: Boolean): ScrollView {
         val rows = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
+            gravity = if (inverted) android.view.Gravity.BOTTOM else android.view.Gravity.TOP
             setBackgroundColor(BLACK)
             if (inverted) scaleY = -1f
         }
         return ScrollView(this).apply {
-            isFillViewport = false
+            // Fill short lists so the inverted upper list stays anchored to the
+            // bottom edge instead of appearing at the top with empty space below.
+            isFillViewport = true
             overScrollMode = View.OVER_SCROLL_NEVER
             setBackgroundColor(BLACK)
             if (inverted) scaleY = -1f
