@@ -382,11 +382,18 @@ class MainActivity : Activity() {
                 orientation = LinearLayout.HORIZONTAL
                 gravity = if (thumbOrigin) android.view.Gravity.END else android.view.Gravity.START
             }
+            if (thumbOrigin) {
+                repeat(columns - group.size) {
+                    gridRow.addView(View(this), LinearLayout.LayoutParams(0, dp(78), 1f))
+                }
+            }
             orderedItems.forEach { item ->
                 gridRow.addView(makeItemRow(item), LinearLayout.LayoutParams(0, dp(78), 1f))
             }
-            repeat(columns - group.size) {
-                gridRow.addView(View(this), LinearLayout.LayoutParams(0, dp(78), 1f))
+            if (!thumbOrigin) {
+                repeat(columns - group.size) {
+                    gridRow.addView(View(this), LinearLayout.LayoutParams(0, dp(78), 1f))
+                }
             }
             container.addView(gridRow, LinearLayout.LayoutParams(-1, dp(78)))
         }
