@@ -350,13 +350,31 @@ class MainActivity : Activity() {
     private fun renderLeft(resetToTop: Boolean = false) {
         if (!::leftRows.isInitialized) return
         val y = leftScroll.scrollY
-        leftRows.removeAllViews()
         val visible = items.asSequence().distinctBy { it.key }
             .filter { filter == null || it.initial == filter }
             .toList()
-        renderAppGrid(leftRows, visible, 4, thumbOrigin = true)
-        if (resetToTop) leftScroll.post { leftScroll.scrollTo(0, leftRows.height) }
-        else leftScroll.post { leftScroll.scrollTo(0, y) }
+
+        // Build the complete next frame off-screen, then swap children in one
+        // layout transaction. This avoids showing an empty grid during Refresh.
+        val nextRows = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = android.view.Gravity.BOTTOM
+            setBackgroundColor(BLACK)
+        }
+        renderAppGrid(nextRows, visible, 4, thumbOrigin = true)
+        leftRows.suppressLayout(true)
+        try {
+            leftRows.removeAllViews()
+            while (nextRows.childCount > 0) {
+                val child = nextRows.getChildAt(0)
+                nextRows.removeViewAt(0)
+                leftRows.addView(child, LinearLayout.LayoutParams(-1, dp(78)))
+            }
+        } finally {
+            leftRows.suppressLayout(false)
+        }
+        if (resetToTop) leftScroll.scrollTo(0, leftRows.height)
+        else leftScroll.scrollTo(0, y)
     }
 
     private fun renderRight(resetToTop: Boolean = false) {
