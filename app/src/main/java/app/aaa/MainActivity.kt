@@ -281,6 +281,9 @@ class MainActivity : Activity() {
 
         leftScroll = makeAppScroll()
         leftRows = leftScroll.getChildAt(0) as LinearLayout
+        // When the list is shorter than the viewport, pin its first items to
+        // the bottom edge nearest the right thumb instead of leaving them at top.
+        leftRows.gravity = android.view.Gravity.BOTTOM
         content.addView(leftScroll, LinearLayout.LayoutParams(-1, 0, 3f))
 
         val letters = LinearLayout(this).apply {
