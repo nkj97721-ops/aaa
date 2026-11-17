@@ -370,7 +370,6 @@ class MainActivity : Activity() {
         container: LinearLayout,
         source: List<Item>,
         columns: Int,
-    ) {
         thumbOrigin: Boolean = false,
     ) {
         // For the upper app area, the first item starts at bottom-right.
