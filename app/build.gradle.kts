@@ -7,11 +7,11 @@ android {
     namespace = "app.aaa"
     compileSdk = 35
     defaultConfig {
-        applicationId = "app.c11180144"
+        applicationId = "app.c11180150"
         minSdk = 29
         targetSdk = 35
-        versionCode = 11180144
-        versionName = "2026.11.18.0144"
+        versionCode = 11180150
+        versionName = "2026.11.18.0150"
         ndk { abiFilters += "arm64-v8a" }
     }
     buildTypes {
