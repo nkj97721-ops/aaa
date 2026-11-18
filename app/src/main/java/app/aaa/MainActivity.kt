@@ -246,19 +246,15 @@ class MainActivity : Activity() {
             if (':' in key) key else "$key:0"
         })
         launched.putAll(prefs.getStringSet("launched", emptySet())!!.associateWith { System.currentTimeMillis() })
+        // Load the saved app order before the first screen is rendered.
+        // This avoids an empty first frame followed by an asynchronous list swap.
+        items.clear()
+        items.addAll(loadCachedItems())
         buildScreen()
         root.post {
             renderLists()
         }
-        // Startup is cache-only: no permission checks, prompts, or package scan.
-        worker.execute {
-            val cached = loadCachedItems()
-            runOnUiThread {
-                if (items.isEmpty() && cached.isNotEmpty()) {
-                    items.clear(); items.addAll(cached); renderLists()
-                }
-            }
-        }
+        // Startup remains cache-only: no permission checks, prompts, or package scan.
     }
 
     private fun buildScreen() {
@@ -374,18 +370,24 @@ class MainActivity : Activity() {
         } finally {
             leftRows.suppressLayout(false)
         }
-        if (resetToTop) {
-            // Measure the replacement content before the next frame, then set
-            // the final bottom-origin scroll offset synchronously. Never draw
-            // the previous/top (last-app) position as an intermediate frame.
-            val widthSpec = View.MeasureSpec.makeMeasureSpec(leftScroll.width, View.MeasureSpec.EXACTLY)
-            val heightSpec = View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED)
-            leftRows.measure(widthSpec, heightSpec)
-            val targetY = (leftRows.measuredHeight - leftScroll.height).coerceAtLeast(0)
-            leftScroll.scrollTo(0, targetY)
-        } else {
-            leftScroll.scrollTo(0, y)
-        }
+        // Apply the final scroll position after the new child tree has been
+        // measured and laid out, but before Android draws that frame.
+        val observer = leftScroll.viewTreeObserver
+        observer.addOnPreDrawListener(object : android.view.ViewTreeObserver.OnPreDrawListener {
+            override fun onPreDraw(): Boolean {
+                if (leftScroll.viewTreeObserver.isAlive) {
+                    leftScroll.viewTreeObserver.removeOnPreDrawListener(this)
+                }
+                val targetY = if (resetToTop) {
+                    (leftRows.height - leftScroll.height).coerceAtLeast(0)
+                } else {
+                    y.coerceAtMost((leftRows.height - leftScroll.height).coerceAtLeast(0))
+                }
+                leftScroll.scrollTo(0, targetY)
+                return true
+            }
+        })
+        leftRows.requestLayout()
         leftScroll.requestLayout()
     }
 
